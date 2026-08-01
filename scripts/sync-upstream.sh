@@ -6,6 +6,41 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 STATE_FILE="$REPO_DIR/.upstream-last-hash"
 
+# Paths owned by tuannx/embabel-agent only — not in embabel/embabel-agent upstream.
+FORK_ONLY_PATHS=(
+  ".github/workflows/arcade-agent-analysis.yml"
+  ".cursor/rules/arcade-architecture.mdc"
+  ".github/FORK_ONLY.md"
+)
+
+restore_fork_only_paths() {
+  local source_ref="$1"
+  for path in "${FORK_ONLY_PATHS[@]}"; do
+    if git cat-file -e "${source_ref}:${path}" 2>/dev/null; then
+      git checkout "${source_ref}" -- "$path"
+      echo "Restored fork-only: ${path}"
+    fi
+  done
+}
+
+ensure_gitignore_arcade_block() {
+  if ! grep -q 'arcade-agent local analysis' .gitignore 2>/dev/null; then
+    cat >> .gitignore <<'EOF'
+
+# arcade-agent local analysis outputs (fork-only)
+arcade_analysis_*.json
+arcade_analysis_*.html
+arcade_analysis_baseline.json
+pr_comment.md
+.arcade-cache/
+
+# local arcade-agent venv
+.arcade-venv/
+EOF
+    echo "Appended fork-only arcade-agent gitignore entries."
+  fi
+}
+
 cd "$REPO_DIR"
 
 # ---- Stash local changes if any ----
@@ -48,15 +83,26 @@ fi
 echo ""
 echo "=== MERGING UPSTREAM ==="
 git checkout main
+PRE_MERGE_REF=$(git rev-parse main)
 if git merge upstream/main --ff-only 2>/dev/null; then
   echo "Fast-forward merge successful."
-  echo "=== PUSHING TO FORK ==="
-  git push origin main 2>&1 || echo "WARNING: Push failed (check OAuth scope for workflow files)"
 else
   echo "Fast-forward not possible, trying normal merge..."
   git merge upstream/main --no-edit 2>&1
-  git push origin main 2>&1 || echo "WARNING: Push failed (check OAuth scope for workflow files)"
 fi
+
+echo ""
+echo "=== RESTORING FORK-ONLY ASSETS (arcade-agent) ==="
+restore_fork_only_paths "${PRE_MERGE_REF}"
+ensure_gitignore_arcade_block
+if ! git diff --quiet; then
+  git add "${FORK_ONLY_PATHS[@]}" .gitignore 2>/dev/null || true
+  git commit -m "chore: restore fork-only arcade-agent assets after upstream sync" --no-edit 2>/dev/null \
+    || echo "No fork-only restore commit needed."
+fi
+
+echo "=== PUSHING TO FORK ==="
+git push origin main 2>&1 || echo "WARNING: Push failed (check OAuth scope for workflow files)"
 
 # ---- Restore local changes ----
 if [ "$STASH_NEEDED" = true ]; then
