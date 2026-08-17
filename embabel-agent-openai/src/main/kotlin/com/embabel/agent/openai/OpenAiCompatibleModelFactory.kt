@@ -15,6 +15,7 @@
  */
 package com.embabel.agent.openai
 
+import com.embabel.agent.api.models.AtlasCloudModels
 import com.embabel.agent.api.models.DeepSeekModels
 import com.embabel.agent.api.models.GoogleGenAiModels
 import com.embabel.agent.api.models.MistralAiModels
@@ -25,6 +26,7 @@ import com.embabel.chat.UserMessage
 import com.embabel.common.ai.model.*
 import com.embabel.common.byok.ByokFactory
 import com.embabel.common.byok.InvalidApiKeyException
+import com.embabel.common.byok.requireUsableApiKey
 import com.embabel.common.byok.validatedEmbeddingService
 import com.embabel.common.util.ObjectProviders
 import com.openai.client.OpenAIClient
@@ -88,24 +90,39 @@ open class OpenAiCompatibleModelFactory(
         private const val CONNECT_TIMEOUT_MS = 5_000L
         private const val READ_TIMEOUT_MS = 600_000L
 
+        private val OPEN_AI = ProviderEndpoint(OpenAiModels.PROVIDER, null)
+        private val DEEP_SEEK = ProviderEndpoint(DeepSeekModels.PROVIDER, "https://api.deepseek.com")
+        private val MISTRAL = ProviderEndpoint(MistralAiModels.PROVIDER, "https://api.mistral.ai")
+        private val GEMINI = ProviderEndpoint(
+            GoogleGenAiModels.PROVIDER,
+            "https://generativelanguage.googleapis.com/v1beta/openai",
+        )
+        private val ATLAS_CLOUD = ProviderEndpoint(AtlasCloudModels.PROVIDER, "https://api.atlascloud.ai/v1")
+
+        private val ENDPOINTS_BY_PROVIDER: Map<String, ProviderEndpoint> =
+            listOf(OPEN_AI, DEEP_SEEK, MISTRAL, GEMINI, ATLAS_CLOUD)
+                .associateBy { it.provider.lowercase() }
+
         /**
-         * Message for a key that is present but blank.
+         * The endpoint for [provider], or null if this module does not speak to it.
          *
-         * Deliberately local. The LLM BYOK path grows the same rule in #1888, and a shared
-         * helper is the right home for it — but putting it there from here would couple these
-         * two branches for four lines. Collapse this onto that helper once both have landed.
+         * Lets a caller holding only a provider name - a user's stored credential, say - build a
+         * service for any provider this module supports, without repeating the base URLs. Every
+         * such copy is a place to mistype a URL or fall behind one that changes.
+         *
+         * Null means "not one of ours", which is distinct from [ProviderEndpoint.baseUrl] being
+         * null: OpenAI itself is supported and takes the SDK default.
          */
-        internal val BLANK_EMBEDDING_KEY_MESSAGE: String = """
-            API key is blank. A blank key is treated as absent:
-            supply a non-empty key, or omit it and let the caller decide there is no key for this request.
-        """.trimIndent()
+        @JvmStatic
+        fun endpointFor(provider: String): ProviderEndpoint? =
+            ENDPOINTS_BY_PROVIDER[provider.trim().lowercase()]
 
         /**
          * Returns a [ByokSpec] for OpenAI.
          * Validates against [OpenAiModels.GPT_41_MINI] by default.
          */
         fun openAi(apiKey: String): ByokSpec =
-            ByokSpec(null, apiKey, OpenAiModels.GPT_41_MINI, OpenAiModels.PROVIDER)
+            ByokSpec(OPEN_AI.baseUrl, apiKey, OpenAiModels.GPT_41_MINI, OPEN_AI.provider)
 
         /**
          * Returns a [ByokSpec] for DeepSeek (OpenAI-compatible endpoint).
@@ -114,7 +131,7 @@ open class OpenAiCompatibleModelFactory(
          * Note: uses the OpenAI wire protocol, not the native Spring AI DeepSeek client.
          */
         fun deepSeek(apiKey: String): ByokSpec =
-            ByokSpec("https://api.deepseek.com", apiKey, DeepSeekModels.DEEPSEEK_V4_FLASH, DeepSeekModels.PROVIDER)
+            ByokSpec(DEEP_SEEK.baseUrl, apiKey, DeepSeekModels.DEEPSEEK_V4_FLASH, DEEP_SEEK.provider)
 
         /**
          * Returns a [ByokSpec] for Mistral AI (OpenAI-compatible endpoint).
@@ -123,19 +140,21 @@ open class OpenAiCompatibleModelFactory(
          * Note: uses the OpenAI wire protocol, not the native Spring AI Mistral client.
          */
         fun mistral(apiKey: String): ByokSpec =
-            ByokSpec("https://api.mistral.ai", apiKey, MistralAiModels.MINISTRAL_8B, MistralAiModels.PROVIDER)
+            ByokSpec(MISTRAL.baseUrl, apiKey, MistralAiModels.MINISTRAL_8B, MISTRAL.provider)
 
         /**
          * Returns a [ByokSpec] for Google Gemini (OpenAI-compatible endpoint).
          * Validates against [GoogleGenAiModels.GEMINI_2_5_FLASH] by default.
          */
         fun gemini(apiKey: String): ByokSpec =
-            ByokSpec(
-                "https://generativelanguage.googleapis.com/v1beta/openai",
-                apiKey,
-                GoogleGenAiModels.GEMINI_2_5_FLASH,
-                GoogleGenAiModels.PROVIDER,
-            )
+            ByokSpec(GEMINI.baseUrl, apiKey, GoogleGenAiModels.GEMINI_2_5_FLASH, GEMINI.provider)
+
+        /**
+         * Returns a [ByokSpec] for Atlas Cloud (OpenAI-compatible endpoint).
+         * Validates against [AtlasCloudModels.QWEN3_5_FLASH] by default.
+         */
+        fun atlasCloud(apiKey: String): ByokSpec =
+            ByokSpec(ATLAS_CLOUD.baseUrl, apiKey, AtlasCloudModels.QWEN3_5_FLASH, ATLAS_CLOUD.provider)
 
         /**
          * Returns a [ByokSpec] for a custom OpenAI-compatible provider.
@@ -197,12 +216,27 @@ open class OpenAiCompatibleModelFactory(
     }
 
     /**
+     * Where an OpenAI-compatible provider lives, under the name this framework knows it by.
+     *
+     * [provider] is the canonical constant - `OpenAiModels.PROVIDER` and friends - rather than
+     * whatever spelling a caller looked it up with, so a service built from a stored credential
+     * reports the same provider as one built from configuration.
+     *
+     * A null [baseUrl] means the SDK default, which is OpenAI's own endpoint.
+     */
+    data class ProviderEndpoint(
+        val provider: String,
+        val baseUrl: String?,
+    )
+
+    /**
      * A self-contained BYOK spec for an OpenAI-compatible provider. Implements [ByokFactory]
      * so it can be passed directly to [com.embabel.common.byok.detectProvider].
      *
      * Obtained via the companion factory methods ([openAi], [deepSeek], [mistral], [gemini],
-     * or [byok] for custom providers). Use [validating] to override the default validation
-     * model and provider — for example if the key only grants access to a specific model tier.
+     * [atlasCloud], or [byok] for custom providers). Use [validating] to override the default
+     * validation model and provider — for example if the key only grants access to a specific
+     * model tier.
      */
     class ByokSpec internal constructor(
         private val baseUrl: String?,
@@ -374,6 +408,17 @@ open class OpenAiCompatibleModelFactory(
      * so the probe relies on the openai-java SDK's own no-retry default (any 401 fails fast).
      * On any exception the provider-specific error is translated to [InvalidApiKeyException],
      * keeping Spring AI types out of the caller.
+     *
+     * A blank key is rejected before any network call — see [requireUsableApiKey] for why a key
+     * is set-but-empty far more often than it looks.
+     *
+     * Note this narrows the constructor's contract, where [apiKey] may be null meaning "no
+     * authentication". That remains true of the factory; it is not true of *validation*, which
+     * exists to answer "is this key usable" and has nothing to answer for an absent one. A keyless
+     * endpoint — a local LM Studio or vLLM server — should be built with [openAiCompatibleLlm]
+     * rather than validated here.
+     *
+     * @throws InvalidApiKeyException if the key is blank, absent, or invalid.
      */
     fun buildValidated(
         model: String,
@@ -381,6 +426,7 @@ open class OpenAiCompatibleModelFactory(
         provider: String,
         knowledgeCutoffDate: LocalDate?,
     ): LlmService<*> {
+        requireUsableApiKey(apiKey)
         val probe = openAiCompatibleLlm(
             model = model,
             pricingModel = pricingModel,
@@ -416,9 +462,7 @@ open class OpenAiCompatibleModelFactory(
         provider: String,
         pricingModel: PricingModel? = null,
     ): EmbeddingService {
-        if (apiKey.isNullOrBlank()) {
-            throw InvalidApiKeyException(BLANK_EMBEDDING_KEY_MESSAGE)
-        }
+        requireUsableApiKey(apiKey)
         return validatedEmbeddingService(model = model, provider = provider) { configuredDimensions ->
             openAiCompatibleEmbeddingService(
                 model = model,

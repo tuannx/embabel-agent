@@ -29,6 +29,7 @@ import com.embabel.agent.rag.service.RegexSearchOperations
 import com.embabel.agent.rag.service.ResultExpander
 import com.embabel.agent.rag.service.RetrievableResultsFormatter
 import com.embabel.agent.rag.service.SearchOperations
+import com.embabel.agent.rag.service.SectionReader
 import com.embabel.agent.rag.service.SimilarityResults
 import com.embabel.agent.rag.service.SimpleRetrievableResultsFormatter
 import com.embabel.agent.rag.service.TextSearch
@@ -100,6 +101,7 @@ data class ToolishRag @JvmOverloads constructor(
     val metadataFilter: PropertyFilter? = null,
     val entityFilter: EntityFilter? = null,
     val maxZoomOutChars: Int = ResultExpanderTools.DEFAULT_MAX_ZOOM_OUT_CHARS,
+    val maxReadSectionChars: Int = SectionReadingTools.DEFAULT_MAX_READ_SECTION_CHARS,
     /**
      * Progressively-disclosed guidance appended to the unfold response when
      * the LLM invokes this tool. Right home for search-strategy notes
@@ -109,6 +111,11 @@ data class ToolishRag @JvmOverloads constructor(
      * See [com.embabel.agent.api.tool.progressive.UnfoldingTool.childToolUsageNotes].
      */
     val childToolUsageNotes: String? = null,
+    /**
+     * Similarity floors used when the LLM omits the optional `threshold` parameter
+     * on the vector/text search tools. See [SearchDefaults] for why it is optional.
+     */
+    val searchDefaults: SearchDefaults = SearchDefaults.DEFAULT,
 ) : LlmReference, DelegatingTool, EagerSearch<ToolishRag> {
 
     private val logger = LoggerFactory.getLogger(javaClass)
@@ -147,7 +154,12 @@ data class ToolishRag @JvmOverloads constructor(
             }
             if (searchOperations is VectorSearch) {
                 logger.debug("Adding VectorSearchTools to ToolishRag '{}'", name)
-                add(VectorSearchTools(searchOperations, vectorSearchFor, metadataFilter, entityFilter, listener))
+                add(
+                    VectorSearchTools(
+                        searchOperations, vectorSearchFor, metadataFilter, entityFilter, listener, searchDefaults,
+                        searchOperations as? ResultExpander,
+                    )
+                )
             } else {
                 if (hints.any { it is TryHyDE }) {
                     logger.warn(
@@ -159,11 +171,20 @@ data class ToolishRag @JvmOverloads constructor(
             }
             if (searchOperations is TextSearch) {
                 logger.debug("Adding TextSearchTools to ToolishRag '{}'", name)
-                add(TextSearchTools(searchOperations, textSearchFor, metadataFilter, entityFilter, listener))
+                add(
+                    TextSearchTools(
+                        searchOperations, textSearchFor, metadataFilter, entityFilter, listener, searchDefaults,
+                        searchOperations as? ResultExpander,
+                    )
+                )
             }
             if (searchOperations is ResultExpander) {
                 logger.debug("Adding ResultExpanderTools to ToolishRag '{}'", name)
-                add(ResultExpanderTools(searchOperations, maxZoomOutChars))
+                add(ResultExpanderTools(searchOperations, maxZoomOutChars, listener))
+            }
+            if (searchOperations is SectionReader) {
+                logger.debug("Adding SectionReadingTools to ToolishRag '{}'", name)
+                add(SectionReadingTools(searchOperations, listener, maxReadSectionChars))
             }
             if (searchOperations is RegexSearchOperations) {
                 logger.debug("Adding RegexSearchTools to ToolishRag '{}'", name)
@@ -234,6 +255,21 @@ data class ToolishRag @JvmOverloads constructor(
      */
     fun withMaxZoomOutChars(maxChars: Int): ToolishRag =
         copy(maxZoomOutChars = maxChars)
+
+    /**
+     * Set the maximum number of characters a single readSection result may return
+     * before it is truncated at a chunk boundary.
+     */
+    fun withMaxReadSectionChars(maxChars: Int): ToolishRag =
+        copy(maxReadSectionChars = maxChars)
+
+    /**
+     * Set the similarity floors applied when the LLM omits the optional `threshold`
+     * search parameter. Deployments that have calibrated a cutoff against their own
+     * eval set should set it here rather than expecting the model to pass one.
+     */
+    fun withSearchDefaults(searchDefaults: SearchDefaults): ToolishRag =
+        copy(searchDefaults = searchDefaults)
 
     override fun withEagerSearchAbout(request: TextSimilaritySearchRequest): ToolishRag {
         val vs = searchOperations as? VectorSearch
