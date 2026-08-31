@@ -869,3 +869,33 @@ class AgentWithOperationContextConstructorInjection(
     @Action
     fun act(input: UserInput): PersonWithReverseTool = PersonWithReverseTool(input.content)
 }
+
+@Agent(description = "goal method is not annotated with Action on agent")
+class AgentWithAchievesGoalNoActionAnnotation {
+    @Action
+    fun makeFrogFromPerson(userInput: UserInput): Frog {
+        return Frog(userInput.content)
+    }
+
+    @AchievesGoal(description = "goal")
+    fun goal(frog: Frog): PersonWithReverseTool = PersonWithReverseTool(frog.name)
+}
+
+@EmbabelComponent()
+class AgenticComponentWithNoActionNoConditionNoGoalAnnotation {
+    fun makeFrogFromPerson(userInput: UserInput): Frog {
+        return Frog(userInput.content)
+    }
+
+    @AchievesGoal(description = "goal")
+    fun goal(frog: Frog): PersonWithReverseTool = PersonWithReverseTool(frog.name)
+}
+
+@Agent(description = "valid goal method")
+class AgentWithValidAchievesGoalMethod {
+    @Action
+    @AchievesGoal(description = "goal")
+    fun goal(input: UserInput): String {
+        return "dummy"
+    }
+}
