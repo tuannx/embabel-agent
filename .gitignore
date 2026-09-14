@@ -28,6 +28,9 @@ build.log
 # Miscellaneous
 .env
 
+# Upstream sync runtime state
+.upstream-last-hash
+
 # Mac OSX aux files
 .DS_Store
 **/.DS_Store
