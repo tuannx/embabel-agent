@@ -45,7 +45,10 @@ cd "$REPO_DIR"
 
 # ---- Stash local changes if any ----
 STASH_NEEDED=false
-if [ -n "$(git status --porcelain)" ]; then
+# Do not treat untracked files as a stash request: `git stash pop` would
+# otherwise consume an unrelated pre-existing stash when `git stash push`
+# has nothing to save.
+if ! git diff --quiet || ! git diff --cached --quiet; then
   STASH_NEEDED=true
   git stash push -m "auto-stash before upstream sync $(date +%Y-%m-%d_%H%M)" 2>/dev/null
 fi
@@ -53,6 +56,7 @@ fi
 # ---- Fetch upstream ----
 echo "=== FETCHING UPSTREAM ==="
 git fetch upstream --tags 2>&1
+git fetch origin main 2>&1
 
 LAST_HASH=""
 if [ -f "$STATE_FILE" ]; then
@@ -61,8 +65,20 @@ fi
 
 CURRENT_HASH=$(git rev-parse upstream/main)
 
-if [ "$LAST_HASH" = "$CURRENT_HASH" ]; then
-  echo "NO_CHANGES: Already at $CURRENT_HASH"
+if [ "$LAST_HASH" = "$CURRENT_HASH" ] && git merge-base --is-ancestor "$CURRENT_HASH" main; then
+  AHEAD=$(git rev-list --count "origin/main..main")
+  BEHIND=$(git rev-list --count "main..origin/main")
+  if [ "$AHEAD" = "0" ] && [ "$BEHIND" = "0" ]; then
+    echo "NO_CHANGES: Already at $CURRENT_HASH and origin is synchronized"
+  else
+    echo "=== RECONCILING ORIGIN ($AHEAD ahead, $BEHIND behind) ==="
+    if [ "$BEHIND" != "0" ]; then
+      git merge origin/main --no-edit
+    fi
+    git push origin main 2>&1
+    echo "$CURRENT_HASH" > "$STATE_FILE"
+    echo "ORIGIN_SYNCHRONIZED: $CURRENT_HASH"
+  fi
   if [ "$STASH_NEEDED" = true ]; then
     git stash pop 2>/dev/null || true
   fi
@@ -102,7 +118,12 @@ if ! git diff --quiet; then
 fi
 
 echo "=== PUSHING TO FORK ==="
-git push origin main 2>&1 || echo "WARNING: Push failed (check OAuth scope for workflow files)"
+if ! git push origin main 2>&1; then
+  echo "Push raced with an origin update; fetching, merging, and retrying..."
+  git fetch origin main
+  git merge origin/main --no-edit
+  git push origin main 2>&1
+fi
 
 # ---- Restore local changes ----
 if [ "$STASH_NEEDED" = true ]; then
