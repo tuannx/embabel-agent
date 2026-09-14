@@ -30,7 +30,7 @@ import kotlin.time.Duration.Companion.seconds
  * Tests for DockerExecutionEngine.
  *
  * These tests require Docker to be installed and running.
- * They use the standard ubuntu:22.04 image which should be widely available.
+ * They use the standard ubuntu:26.04 image which should be widely available.
  */
 @DisabledOnOs(OS.WINDOWS)
 @EnabledIf("shouldRunDockerTests", disabledReason = "Docker tests run in CI or macOS only - skipped on local Linux due to environment differences")
@@ -41,7 +41,7 @@ class DockerSkillScriptExecutionEngineTest {
 
     companion object {
         // Use ubuntu image for tests since it's widely available
-        private const val TEST_IMAGE = "ubuntu:22.04"
+        private const val TEST_IMAGE = "ubuntu:26.04"
 
         @JvmStatic
         fun isDockerAvailable(): Boolean {
