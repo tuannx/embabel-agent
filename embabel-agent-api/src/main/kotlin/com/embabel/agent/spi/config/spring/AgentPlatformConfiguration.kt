@@ -19,6 +19,7 @@ package com.embabel.agent.spi.config.spring
 
 import com.embabel.agent.api.channel.DevNullOutputChannel
 import com.embabel.agent.api.channel.OutputChannel
+import com.embabel.agent.api.common.decision.DecisionProvider
 import com.embabel.agent.api.common.ranking.Ranker
 import com.embabel.agent.api.event.AgenticEventListener
 import com.embabel.agent.api.event.observation.AgentInstrumentation
@@ -140,10 +141,22 @@ class AgentPlatformConfiguration(
     fun ranker(
         llmOperations: LlmOperations,
         rankingProperties: RankingProperties,
-    ): Ranker = LlmRanker(
-        llmOperations = llmOperations,
-        rankingProperties = rankingProperties,
-    )
+        decisionProvider: ObjectProvider<DecisionProvider>,
+    ): Ranker {
+        val llmRanker = LlmRanker(
+            llmOperations = llmOperations,
+            rankingProperties = rankingProperties,
+        )
+        val provider = decisionProvider.getIfAvailable()
+        if (provider == null || !provider.isAvailable) {
+            return llmRanker
+        }
+        return DecisionRanker(
+            decisionProvider = provider,
+            delegate = llmRanker,
+            rankingProperties = rankingProperties,
+        )
+    }
 
     /**
      * Runtime repository, decorated for durability when the application supplies an
