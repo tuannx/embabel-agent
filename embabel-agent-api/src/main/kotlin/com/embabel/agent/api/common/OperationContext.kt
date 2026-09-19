@@ -17,6 +17,8 @@ package com.embabel.agent.api.common
 
 import com.embabel.agent.api.common.support.DelegatingStreamingPromptRunner
 import com.embabel.agent.api.common.support.OperationContextDelegate
+import com.embabel.agent.api.common.decision.DecisionProvider
+import com.embabel.agent.api.common.decision.DisabledDecisionProvider
 import com.embabel.agent.api.dsl.TypedAgentScopeBuilder
 import com.embabel.agent.api.event.AgenticEventListener
 import com.embabel.agent.api.identity.User
@@ -77,6 +79,16 @@ interface OperationContext : Blackboard, ToolGroupConsumer {
      * Get AI functionality for this context
      */
     fun ai(): Ai = OperationContextAi(this)
+
+    /**
+     * Bounded decisions against blackboard or domain state.
+     * Ask noul/choice/score questions for @Action and @Condition code to branch on.
+     * Unlike promptRunner, this never generates text, calls tools, or plans.
+     * Returns the disabled provider when no decision backend is configured;
+     * guard usage with DecisionProvider.isAvailable.
+     */
+    fun decisions(): DecisionProvider =
+        processContext.platformServices.decisionProvider() ?: DisabledDecisionProvider
 
     /**
      * Create a prompt runner for this context.
