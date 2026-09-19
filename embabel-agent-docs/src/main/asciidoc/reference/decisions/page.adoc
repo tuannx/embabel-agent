@@ -33,54 +33,50 @@ In short: use Jev where you would otherwise write a smart if statement; use an L
 you need language and deep reasoning. Jev does not replace the LLM — it replaces the places
 where an LLM was previously used just to make a small decision.
 
-==== Use Case Map
+==== Use Cases in Embabel
 
-Where common System One use cases land in Embabel:
+Where bounded decisions land in this codebase:
 
 [cols="1,1,1", options="header", frame="all", grid="all"]
 |===
 |Use case |Embabel home |Status
 
-|Realtime game/robotics loops
-|None
-|Out of scope. The latency fits but Embabel is an agent framework, not a realtime control loop.
+|Agent and goal ranking
+|`Autonomy` via `DecisionRanker`
+|Done. Strategy `auto`/`jev`/`llm` per deployment.
 
-|Per-step browser/computer-use action choice
-|Ranking over candidate actions, as with `DecisionRanker`
-|Caution. Ranking a fixed candidate set is fine; Jev must not become the planner.
+|Condition judgments for planning
+|`DecisionCondition`
+|Done. Noul over blackboard state against the platform cut-off.
 
-|Pre-tool risk screening
-|`ToolDecorator` wrapping invocation
-|Follow-up. Needs blocking semantics that terminate rather than retry, plus per-tool policy.
+|Bulk classification in `@Action`
+|`decisions()`, as in the ticket example above
+|Done.
 
-|Per-task model routing
-|`AutoLlmSelectionCriteriaResolver`
-|Blocked. The interface carries no task context yet (marked TODO); revisit when it does.
-
-|Goal-progress and stuck-loop detection
-|`DecisionCondition` over blackboard state
-|Recipe. See below.
+|Stuck-loop and progress detection
+|`DecisionCondition` recipe
+|Done. See below.
 
 |Context keep-or-drop triage
 |`decisions()` inside `@Action`
-|Recipe. One noul judgment per item beats re-summarizing whole conversations.
+|Done. One noul judgment per item beats re-summarizing whole conversations.
 
-|Skill/tool selection
-|`ToolGroupResolver`
-|Misfit as-is. Resolution is role-based, not intent-ranked; revisit if that changes.
+|Output guardrail screening
+|`decisions()` before the next step
+|Next. Offered as the follow-up integration.
 
-|Output and reasoning-trace guardrails
-|`decisions()` screening before the next step
-|Recipe progressing to a follow-up hook; offered as the next integration.
-
-|Bulk classification (email, tickets, requests)
-|`decisions()` inside `@Action`, as in the ticket example above
-|Done.
+|Pre-tool risk screening
+|`ToolDecorator` wrapping invocation
+|Follow-up. Needs blocking semantics that terminate rather than retry.
 
 |RAG reranking
 |RAG pipeline filter stage
 |Follow-up. Lives in the RAG modules, separate from this integration.
 |===
+
+Explicitly out of scope: realtime game/robotics loops, per-step browser/computer-use
+planning, model routing (the resolver carries no task context), and intent-based tool
+selection (the resolver is role-based). Jev stays out of tool loops and planning.
 
 A stuck-loop detector needs no new code — it is one condition:
 
