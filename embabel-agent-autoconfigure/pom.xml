@@ -20,7 +20,6 @@
     </scm>
     
     <modules>
-        <module>models/embabel-agent-typesafe-autoconfigure</module>
         <module>embabel-agent-platform-autoconfigure</module>
         <module>embabel-agent-jdbc-autoconfigure</module>
         <module>embabel-agent-a2a-autoconfigure</module>
@@ -46,6 +45,7 @@
         <module>models/embabel-agent-dashscope-autoconfigure</module>
         <module>models/embabel-agent-mistral-ai-autoconfigure</module>
         <module>models/embabel-agent-onnx-autoconfigure</module>
+        <module>models/embabel-agent-typesafe-autoconfigure</module>
     </modules>
 
     <dependencies>
