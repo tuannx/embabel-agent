@@ -84,6 +84,23 @@ Without a key the stack is inert: ranking keeps the LLM ranker, `decisions()` re
 fail open to the LLM ranker. Each call publishes a `DecisionUsageEvent` with token counts
 and latency only; state and keys are never logged.
 
+==== Ranking Strategy
+
+Which brain performs agent and goal ranking is configurable per deployment:
+
+[source,yaml]
+----
+embabel:
+  agent:
+    platform:
+      ranking:
+        strategy: auto   # auto | jev | llm
+----
+
+- `auto` (default): bounded choice judgments when a decision backend is available, failing open to the LLM ranker otherwise.
+- `jev`: require the decision backend and fail fast without it — use to surface a missing key or quota problem at startup instead of silently ranking with the LLM.
+- `llm`: always use the LLM ranker, even when a decision backend is available — use for debugging or quality comparison.
+
 ==== Ask from @Action Code
 
 [tabs]
