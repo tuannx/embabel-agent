@@ -80,6 +80,15 @@ class FakeOperationContext(
     override fun decisions(): DecisionProvider =
         decisionProvider ?: super<OperationContext>.decisions()
 
+    fun withDecisionProvider(decisionProvider: DecisionProvider): FakeOperationContext =
+        FakeOperationContext(
+            agent = agent,
+            processContext = processContext,
+            operation = operation,
+            toolGroups = toolGroups,
+            decisionProvider = decisionProvider,
+        )
+
     override fun promptRunner(
         llm: LlmOptions,
         toolGroups: Set<ToolGroupRequirement>,
