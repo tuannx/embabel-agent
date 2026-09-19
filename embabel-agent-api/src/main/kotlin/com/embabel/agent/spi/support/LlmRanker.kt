@@ -18,6 +18,7 @@ package com.embabel.agent.spi.support
 import com.embabel.agent.api.common.InteractionId
 import com.embabel.agent.api.common.ranking.Ranker
 import com.embabel.agent.api.common.ranking.Ranking
+import com.embabel.agent.api.common.ranking.RankingStrategy
 import com.embabel.agent.api.common.ranking.Rankings
 import com.embabel.agent.core.internal.LlmOperations
 import com.embabel.agent.core.support.LlmInteraction
@@ -44,6 +45,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties
 @ConfigurationProperties(PREFIX)
 data class RankingProperties(
     val llm: String? = null,
+    val strategy: RankingStrategy = RankingStrategy.AUTO,
     override val maxAttempts: Int = 5,
     override val backoffMillis: Long = 100L,
     override val backoffMultiplier: Double = 5.0,
