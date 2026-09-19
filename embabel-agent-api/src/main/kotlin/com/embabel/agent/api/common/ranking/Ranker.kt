@@ -19,6 +19,27 @@ import com.embabel.common.core.types.*
 import com.embabel.common.util.indent
 
 /**
+ * Which brain performs ranking.
+ */
+enum class RankingStrategy {
+    /**
+     * Bounded choice judgments when a decision backend is available,
+     * failing open to the LLM ranker otherwise.
+     */
+    AUTO,
+
+    /**
+     * Bounded choice judgments, failing fast without a decision backend.
+     */
+    JEV,
+
+    /**
+     * The LLM ranker, even when a decision backend is available.
+     */
+    LLM,
+}
+
+/**
  * Rank available choices based on user input and agent metadata.
  * It's possible that no ranking will be high enough to progress with,
  * but that's a matter for the AgentPlatform using this service.
