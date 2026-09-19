@@ -42,11 +42,21 @@ interface DecisionProvider {
      */
     fun evaluate(
         state: Any,
-        questions: Map<String, DecisionQuestion>,
+        questions: Map<String, @JvmSuppressWildcards DecisionQuestion>,
     ): DecisionAnswers
 
     /**
      * Probability the answer to this yes/no question is yes, between 0 and 1.
+     */
+    fun noul(
+        state: Any,
+        instructions: String,
+    ): NoulAnswer = noul(state, instructions, null, null)
+
+    /**
+     * Probability the answer to this yes/no question is yes, between 0 and 1.
+     * @param yes what a yes near 1 means
+     * @param no what a no near 0 means
      */
     fun noul(
         state: Any,

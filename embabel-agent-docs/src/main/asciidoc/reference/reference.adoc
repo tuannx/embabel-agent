@@ -33,6 +33,8 @@ include::spring/page.adoc[]
 
 include::llms/page.adoc[]
 
+include::decisions/page.adoc[]
+
 include::bedrock/page.adoc[]
 
 include::minimax/page.adoc[]
