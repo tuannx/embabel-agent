@@ -101,6 +101,55 @@ embabel:
 - `jev`: require the decision backend and fail fast without it — use to surface a missing key or quota problem at startup instead of silently ranking with the LLM.
 - `llm`: always use the LLM ranker, even when a decision backend is available — use for debugging or quality comparison.
 
+==== Benchmark
+
+What each integration step costs is reported by tests, not claimed here. Run them with:
+
+[source,bash]
+----
+mvn test -Dtest='DecisionBenchmarkTest' -pl embabel-agent-api
+mvn test -Dtest='TypeSafeBenchmarkTest' -pl embabel-agent-autoconfigure/models/embabel-agent-typesafe-autoconfigure
+----
+
+Method: transports are stubbed (in-memory fakes, MockWebServer on localhost), so timings
+cover Embabel's integration code only. No test touches the live TypeSafe API or spends
+anything: the suites need no keys and run in seconds. Live latency is modeled from
+published figures — Jev answers in ~70-500ms per call with questions evaluated in
+parallel, so batching barely changes response time, versus seconds for an LLM call
+with tools and structured output.
+
+Sample run (CI-class hardware, 20 goals, 12 mixed questions):
+
+[cols="1,1,1,1", options="header", frame="all", grid="all"]
+|===
+|Step |Measured |Calls |Modelled production
+
+|Ranking via `DecisionRanker`
+|~100ms glue
+|1 judgment call
+|One ~70-500ms Jev call; LLM prompt for the same task measured ~1.6KB (~410 input tokens)
+
+|Ranking via `LlmRanker`
+|~20ms glue
+|1 LLM call
+|Seconds per call plus output tokens for the rankings object
+
+|`DecisionCondition` evaluation
+|~0.02ms glue each
+|1 short Jev call only when evaluated
+|One ~70-500ms call versus one full LLM object-creation call
+
+|12 mixed questions via `TypeSafeDecisionProvider`
+|~66ms localhost round-trip, ~1.1KB request (~270 input tokens)
+|1 HTTP request
+|Same single call at ~70-500ms regardless of question count
+|===
+
+Takeaway: the integration overhead is negligible next to any model call; batching keeps
+multi-question judgments at one short call; and the Jev ranking request carries roughly
+the same order of input as the LLM prompt it replaces while returning calibrated
+distributions the autonomy cut-offs consume directly.
+
 ==== Ask from @Action Code
 
 [tabs]
