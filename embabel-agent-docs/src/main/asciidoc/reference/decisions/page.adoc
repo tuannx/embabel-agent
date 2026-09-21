@@ -72,6 +72,10 @@ Where bounded decisions land in this codebase:
 |RAG reranking
 |RAG pipeline filter stage
 |Follow-up. Lives in the RAG modules, separate from this integration.
+
+|Output quality eval in tests
+|`DecisionEval` over `DecisionProvider`
+|Done. See below.
 |===
 
 Explicitly out of scope: realtime game/robotics loops, per-step browser/computer-use
@@ -280,3 +284,28 @@ DecisionCondition(
 )
 ----
 ====
+
+==== Score Outputs in Tests
+
+`DecisionEval` scores agent outputs against rubrics for evals and quality-gate tests,
+backed by any `DecisionProvider` — the live Jev provider in integration tests, or the
+scripted one in unit tests:
+
+[source,kotlin]
+----
+val scripted = ScriptedDecisionProvider(
+    mapOf("question" to NoulAnswer(noul = 0.85)),
+)
+val eval = DecisionEval(scripted)
+assertTrue(eval.meets(summary, "Does the summary mention risks?"))
+
+val tone = DecisionEval(context.decisions()).score(
+    output = summary,
+    instructions = "How polished is the summary?",
+    levels = listOf("Sloppy", "Adequate", "Polished"),
+)
+assertTrue(tone.score >= 1.5)
+----
+
+`ScriptedDecisionProvider` answers by question id and records every evaluation, so tests
+stay deterministic and can assert what was asked.
