@@ -148,7 +148,7 @@ class AgentMetadataReader(
         val targetType = agenticInfo.getTargetType()
 
         if (!agenticInfo.agentic()) {
-            logger.warn(
+            logger.debug(
                 "No @{} or @{} annotation found on {}",
                 EmbabelComponent::class.simpleName,
                 Agent::class.simpleName,
@@ -314,9 +314,8 @@ class AgentMetadataReader(
         if (plannerType == PlannerType.GOAP && agenticInfo.isAgent()) {
             val validationResult = agentValidationManager.validate(agent)
             if (!validationResult.isValid) {
-                logger.warn("Agent validation failed:\n${validationResult.errors.joinToString("\n")}")
                 if (skipAgentDeploymentOnError) {
-                    logSkipAgentDeploymentOnError( "Agent ${targetType.name} is rejected as it has validation errors as reported above.")
+                    logSkipAgentDeploymentOnError( "Agent ${targetType.name} is rejected due to validation errors as reported above.")
                     return null
                 }
             }

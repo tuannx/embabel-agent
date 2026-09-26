@@ -4,7 +4,7 @@
     <parent>
         <groupId>com.embabel.agent</groupId>
         <artifactId>embabel-agent-cache</artifactId>
-        <version>1.5.2-SNAPSHOT</version>
+        <version>1.5.3-SNAPSHOT</version>
     </parent>
     <artifactId>embabel-agent-cache-core</artifactId>
     <packaging>jar</packaging>
@@ -46,6 +46,13 @@
         <dependency>
             <groupId>org.ehcache</groupId>
             <artifactId>ehcache</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- Servlet API for the MockMvc slice; previously arrived only through
+             embabel-agent-test-internal, which cannot be a dependency here. -->
+        <dependency>
+            <groupId>jakarta.servlet</groupId>
+            <artifactId>jakarta.servlet-api</artifactId>
             <scope>test</scope>
         </dependency>
         <!-- Spring MVC test slice for WaitForPersistentRepositoryJCacheMvcIntegrationTest -->

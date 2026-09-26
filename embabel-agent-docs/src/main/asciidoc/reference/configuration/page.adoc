@@ -55,8 +55,8 @@ From `ConfigurableModelProviderProperties` - configuration for default LLMs and 
 
 |`embabel.models.default-llm`
 |String
-|`gpt-4.1-mini`
-|Default LLM name. It's good practice to override this in configuration.
+|`gpt-5.6-luna`
+|The deployment default: either an LLM name, or a role from `embabel.models.llms` or `embabel.models.roles`. A role is resolved per call, so a deployment whose key arrives at runtime has a working default without a restart. It's good practice to override this in configuration.
 
 |`embabel.models.default-embedding-model`
 |String
@@ -197,7 +197,7 @@ Controls how the GOAP planner processes annotated agents during startup.
 |`embabel.agent.api.validation.manager.skip-agent-deployment-on-error`
 |Boolean
 |`false`
-|When `false` (default), validation manager only logs structural errors of `@Agent`s. When `true`, any invalid `@Agent` reported by validation manager is rejected at startup.
+|When `false` (default), the validation manager only logs errors for `@Agent`s. When `true`, any invalid `@Agent` reported by the validation manager is rejected at startup.
 
 |===
 
