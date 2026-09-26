@@ -21,6 +21,7 @@ import com.embabel.agent.api.channel.OutputChannel
 import com.embabel.agent.api.common.Asyncer
 import com.embabel.agent.api.common.PlatformServices
 import com.embabel.agent.api.common.autonomy.Autonomy
+import com.embabel.agent.api.common.decision.DecisionProvider
 import com.embabel.common.util.EmbabelObjectMapperHolder
 import com.embabel.agent.api.event.AgenticEventListener
 import com.embabel.agent.api.event.observation.AgentInstrumentation
@@ -60,6 +61,7 @@ data class SpringContextPlatformServices(
     override val templateRenderer: TemplateRenderer,
     val customLogicalExpressionParser: LogicalExpressionParser? = null,
     private val applicationContext: ApplicationContext?,
+    private val decisionProviderInstance: DecisionProvider? = null,
 ) : PlatformServices {
 
     override val objectMapper: ObjectMapper = embabelObjectMapperHolder.get()
@@ -106,6 +108,15 @@ data class SpringContextPlatformServices(
             "Application context is not available, cannot retrieve ModelProvider bean."
         }.getBean<ModelProvider>()
     }
+
+    /**
+     * Directly configured instance wins; otherwise the single DecisionProvider bean
+     * when the optional decision backend is on the classpath, else null.
+     * Uses [getBeansOfType] so a missing bean yields null instead of throwing.
+     */
+    override fun decisionProvider(): DecisionProvider? =
+        decisionProviderInstance
+            ?: applicationContext?.getBeansOfType<DecisionProvider>()?.values?.firstOrNull()
 
     override fun conversationFactoryProvider(): ConversationFactoryProvider {
         return requireNotNull(applicationContext) {

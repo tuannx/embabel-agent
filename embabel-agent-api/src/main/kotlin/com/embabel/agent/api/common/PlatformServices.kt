@@ -19,6 +19,7 @@ package com.embabel.agent.api.common
 
 import com.embabel.agent.api.channel.OutputChannel
 import com.embabel.agent.api.common.autonomy.Autonomy
+import com.embabel.agent.api.common.decision.DecisionProvider
 import com.embabel.agent.api.event.AgenticEventListener
 import com.embabel.agent.api.event.observation.AgentInstrumentation
 import com.embabel.agent.api.event.observation.InternalObservabilityApi
@@ -86,6 +87,13 @@ interface PlatformServices {
     fun autonomy(): Autonomy
 
     fun modelProvider(): ModelProvider
+
+    /**
+     * Optional bounded-decision capability, backed by a DecisionProvider bean when one is
+     * configured. Null when no decision backend is on the classpath or enabled, in which case
+     * ranking, conditions, and action code keep their existing behavior.
+     */
+    fun decisionProvider(): DecisionProvider? = null
 
     /**
      * Get the conversation factory provider for resolving conversation factories by type.
