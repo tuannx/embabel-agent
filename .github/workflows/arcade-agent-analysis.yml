@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 env:
-  ARCADE_AGENT_VERSION: "0.2.0"
+  ARCADE_AGENT_VERSION: "0.3.0"
 
 jobs:
   analyze:
@@ -28,14 +28,14 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install "arcade-agent[languages]==${ARCADE_AGENT_VERSION}"
 
-      # 0.2.0 has --language only (no --languages). Auto-detect picks Kotlin as the
-      # dominant JVM language; upgrade arcade-agent for explicit java+kotlin polyglot.
+      # 0.3.0 supports --languages for explicit java+kotlin polyglot ingest.
       - name: Run PKG architecture analysis
         run: |
           arcade-self-analysis \
             --source . \
             --repo-name embabel-agent \
             --algorithm pkg \
+            --languages java,kotlin \
             --output-json arcade_analysis_results.json \
             --output-html arcade_analysis_report.html
 
