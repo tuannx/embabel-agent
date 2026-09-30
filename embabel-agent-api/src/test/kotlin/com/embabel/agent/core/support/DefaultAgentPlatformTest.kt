@@ -18,12 +18,17 @@ package com.embabel.agent.core.support
 import com.embabel.agent.api.channel.DevNullOutputChannel
 import com.embabel.common.util.EmbabelObjectMapperHolder
 import com.embabel.agent.api.common.PlatformServices
+import com.embabel.agent.api.annotation.support.AgentMetadataReader
+import com.embabel.agent.api.dsl.agent
 import com.embabel.agent.api.dsl.evenMoreEvilWizard
 import com.embabel.agent.api.event.AgenticEventListener
 import com.embabel.agent.core.AgentPlatform
 import com.embabel.agent.core.Context
 import com.embabel.agent.core.ContextId
 import com.embabel.agent.core.ProcessOptions
+import com.embabel.agent.core.support.duplicates.alpha.Wizard as AlphaWizard
+import com.embabel.agent.core.support.duplicates.beta.Wizard as BetaWizard
+import com.embabel.agent.domain.io.UserInput
 import com.embabel.agent.spi.ContextRepository
 import com.embabel.agent.spi.config.spring.AgentPlatformProperties.ProcessType
 import com.embabel.agent.spi.support.InMemoryContext
@@ -34,8 +39,12 @@ import io.mockk.mockk
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertInstanceOf
 import org.junit.jupiter.api.Assertions.assertNotNull
+import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.api.Nested
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.extension.ExtendWith
+import org.springframework.boot.test.system.CapturedOutput
+import org.springframework.boot.test.system.OutputCaptureExtension
 
 class DefaultAgentPlatformTest {
 
@@ -112,6 +121,76 @@ class DefaultAgentPlatformTest {
 
             assertNotNull(subclassed.platformServices)
             assertInstanceOf(CustomPlatformServices::class.java, subclassed.platformServices)
+        }
+    }
+
+    /** Same-named agents, goals, actions and conditions are reported, see #1834. */
+    @Nested
+    @ExtendWith(OutputCaptureExtension::class)
+    inner class DuplicateNames {
+
+        private val platform = raw()
+
+        private fun dslAgent(
+            agentName: String,
+            goalName: String = "$agentName-goal",
+            actionName: String = "$agentName-action",
+            conditionName: String = "$agentName-condition",
+        ) = agent(agentName, description = "$agentName description") {
+            val condition by conditionOf(name = conditionName) { true }
+            transformation<UserInput, Dog>(name = actionName) { Dog(agentName) }
+            goal(name = goalName, description = "$agentName meaning", satisfiedBy = Dog::class)
+        }
+
+        private fun assertErrorMentions(output: CapturedOutput, vararg fragments: String) {
+            val line = output.out.lines().firstOrNull { line -> "ERROR" in line && fragments.all { it in line } }
+            assertNotNull(line, "Expected an ERROR line mentioning ${fragments.toList()} in:\n${output.out}")
+        }
+
+        @Test
+        @Disabled("#1834: the second deploy replaces the first agent without any report")
+        fun `deploying a second agent with an existing name is reported`(output: CapturedOutput) {
+            platform.deploy(dslAgent(agentName = "AgentA", goalName = "first"))
+            platform.deploy(dslAgent(agentName = "AgentA", goalName = "second"))
+
+            assertErrorMentions(output, "AgentA")
+        }
+
+        @Test
+        @Disabled("#1834: annotated agents default to the simple class name, so the second replaces the first")
+        fun `annotated agents sharing a simple class name are reported with both packages`(output: CapturedOutput) {
+            val reader = AgentMetadataReader()
+            platform.deploy(requireNotNull(reader.createAgentMetadata(AlphaWizard())))
+            platform.deploy(requireNotNull(reader.createAgentMetadata(BetaWizard())))
+
+            assertErrorMentions(output, "Wizard", "duplicates.alpha", "duplicates.beta")
+        }
+
+        @Test
+        @Disabled("#1834: AgentPlatform.goals keeps one goal per name and drops the other silently")
+        fun `goals with the same name in different agents are reported`(output: CapturedOutput) {
+            platform.deploy(dslAgent(agentName = "AgentA", goalName = "done"))
+            platform.deploy(dslAgent(agentName = "AgentB", goalName = "done"))
+
+            assertErrorMentions(output, "done", "AgentA", "AgentB")
+        }
+
+        @Test
+        @Disabled("#1834: AgentPlatform.actions keeps one action per name, so platform-wide planning loses the other")
+        fun `actions with the same name in different agents are reported`(output: CapturedOutput) {
+            platform.deploy(dslAgent(agentName = "AgentA", actionName = "shared"))
+            platform.deploy(dslAgent(agentName = "AgentB", actionName = "shared"))
+
+            assertErrorMentions(output, "shared", "AgentA", "AgentB")
+        }
+
+        @Test
+        @Disabled("#1834: AgentPlatform.conditions keeps one condition per name and drops the other silently")
+        fun `conditions with the same name in different agents are reported`(output: CapturedOutput) {
+            platform.deploy(dslAgent(agentName = "AgentA", conditionName = "ready"))
+            platform.deploy(dslAgent(agentName = "AgentB", conditionName = "ready"))
+
+            assertErrorMentions(output, "ready", "AgentA", "AgentB")
         }
     }
 

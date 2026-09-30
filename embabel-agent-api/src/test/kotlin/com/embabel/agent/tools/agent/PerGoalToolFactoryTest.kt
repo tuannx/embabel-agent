@@ -16,15 +16,24 @@
 package com.embabel.agent.tools.agent
 
 import com.embabel.agent.api.common.autonomy.Autonomy
+import com.embabel.agent.api.dsl.MagicVictim
+import com.embabel.agent.api.dsl.agent
 import com.embabel.agent.api.dsl.evenMoreEvilWizard
 import com.embabel.agent.api.dsl.evenMoreEvilWizardWithStructuredInput
 import com.embabel.agent.api.dsl.exportedEvenMoreEvilWizard
 import com.embabel.agent.api.dsl.userInputToFrogOrPersonBranch
+import com.embabel.agent.core.Export
+import com.embabel.agent.domain.io.UserInput
 import com.embabel.agent.test.integration.IntegrationTestUtils
 import com.embabel.agent.test.integration.RandomRanker
 import com.embabel.agent.test.integration.forAutonomyTesting
 import org.junit.jupiter.api.Assertions.*
+import org.junit.jupiter.api.Disabled
+import org.junit.jupiter.api.Nested
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.extension.ExtendWith
+import org.springframework.boot.test.system.CapturedOutput
+import org.springframework.boot.test.system.OutputCaptureExtension
 
 
 class PerGoalToolFactoryTest {
@@ -205,6 +214,38 @@ class PerGoalToolFactoryTest {
                 "Tool should correspond to a platform goal: $goalName, Offending tool: ${tool.definition.name}",
             )
             assertNotNull(tool.definition.inputSchema.toJsonSchema(), "Should have generated schema")
+        }
+    }
+
+    /** Distinct goals that map to the same tool name are reported, see #1834. */
+    @Nested
+    @ExtendWith(OutputCaptureExtension::class)
+    inner class DuplicateToolNames {
+
+        private fun agentWithGoal(agentName: String, goalName: String) =
+            agent(agentName, description = "$agentName description") {
+                transformation<UserInput, MagicVictim>(name = "$agentName-action") { MagicVictim(agentName) }
+                goal(
+                    name = goalName,
+                    description = "$agentName meaning",
+                    satisfiedBy = MagicVictim::class,
+                    export = Export(remote = true, startingInputTypes = setOf(UserInput::class.java)),
+                )
+            }
+
+        @Test
+        @Disabled("#1834: both goals publish as app_Wizard_done; the MCP server keeps the last one with only a WARN")
+        fun `distinct goals that map to the same tool name are reported`(output: CapturedOutput) {
+            val platform = IntegrationTestUtils.dummyAgentPlatform()
+            platform.deploy(agentWithGoal(agentName = "AlphaWizard", goalName = "com.example.alpha.Wizard.done"))
+            platform.deploy(agentWithGoal(agentName = "BetaWizard", goalName = "com.example.beta.Wizard.done"))
+            val factory = PerGoalToolFactory(Autonomy(platform, RandomRanker(), forAutonomyTesting()), "app")
+
+            factory.goalTools(remoteOnly = true, listeners = emptyList())
+
+            val fragments = listOf("app_Wizard_done", "com.example.alpha.Wizard.done", "com.example.beta.Wizard.done")
+            val line = output.out.lines().firstOrNull { line -> "ERROR" in line && fragments.all { it in line } }
+            assertNotNull(line, "Expected an ERROR line mentioning $fragments in:\n${output.out}")
         }
     }
 
