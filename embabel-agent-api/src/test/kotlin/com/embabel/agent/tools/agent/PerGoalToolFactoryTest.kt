@@ -15,6 +15,15 @@
  */
 package com.embabel.agent.tools.agent
 
+import org.junit.jupiter.api.Disabled
+import org.junit.jupiter.api.extension.ExtendWith
+import org.springframework.boot.test.system.CapturedOutput
+import org.springframework.boot.test.system.OutputCaptureExtension
+import org.junit.jupiter.api.Nested
+import com.embabel.agent.api.dsl.MagicVictim
+import com.embabel.agent.api.dsl.EvilWizardAgent
+import com.embabel.agent.core.Agent
+import com.embabel.agent.domain.io.UserInput
 import com.embabel.agent.api.common.autonomy.Autonomy
 import com.embabel.agent.api.dsl.evenMoreEvilWizard
 import com.embabel.agent.api.dsl.evenMoreEvilWizardWithStructuredInput
@@ -205,6 +214,74 @@ class PerGoalToolFactoryTest {
                 "Tool should correspond to a platform goal: $goalName, Offending tool: ${tool.definition.name}",
             )
             assertNotNull(tool.definition.inputSchema.toJsonSchema(), "Should have generated schema")
+        }
+    }
+
+    @Nested
+    @ExtendWith(OutputCaptureExtension::class)
+    inner class DuplicateToolNames {
+
+        @Test
+        @Disabled("#1834")
+        fun `generated and explicit names report both source goals`(output: CapturedOutput) {
+            val goalName = exportedEvenMoreEvilWizard().goals.single().name
+            val otherGoalName = "com.myco.MyAgent.myGoal"
+            val publishedName = "testApp_MyAgent_myGoal"
+            val factory = factory(
+                source(exportedEvenMoreEvilWizard().name, goalName, publishedName),
+                source(EvilWizardAgent.name, otherGoalName),
+            )
+            val tools = factory.goalTools(remoteOnly = true, listeners = emptyList())
+            assertEquals(listOf(publishedName, publishedName), tools.map { it.definition.name })
+            assertEquals(listOf(goalName, otherGoalName), tools.map { it.goal.name })
+            assertReported(output, publishedName, goalName, otherGoalName)
+        }
+
+        @Test
+        @Disabled("#1834")
+        fun `explicit export colliding with a platform tool is reported on the final list`(output: CapturedOutput) {
+            val goalName = "com.myco.MyAgent.myGoal"
+            val factory = factory(source(exportedEvenMoreEvilWizard().name, goalName, CONFIRMATION_TOOL_NAME))
+            val confirmation = factory.platformTools.single { it.definition.name == CONFIRMATION_TOOL_NAME }
+            val tools = factory.allTools(remoteOnly = true, listeners = emptyList())
+            assertEquals(2, tools.count { it.definition.name == CONFIRMATION_TOOL_NAME })
+            assertEquals(listOf(goalName), tools.filterIsInstance<GoalTool<*>>().map { it.goal.name })
+            assertTrue(confirmation in tools)
+            assertReported(output, CONFIRMATION_TOOL_NAME, goalName, confirmation.definition.description)
+        }
+
+        @Test
+        @Disabled("#1834")
+        fun `multiple input types sharing a published name report both schemas`(output: CapturedOutput) {
+            val inputs = linkedSetOf<Class<*>>(UserInput::class.java, MagicVictim::class.java)
+            val factory = factory(source(exportedEvenMoreEvilWizard().name, "com.myco.MyAgent.myGoal", inputTypes = inputs))
+            val tools = factory.goalTools(remoteOnly = true, listeners = emptyList())
+            assertEquals(listOf("testApp_MyAgent_myGoal", "testApp_MyAgent_myGoal"), tools.map { it.definition.name })
+            assertEquals(inputs.toList(), tools.map { it.inputType })
+            assertReported(output, "testApp_MyAgent_myGoal", "UserInput", "MagicVictim")
+        }
+
+        private fun source(
+            owner: String, goalName: String, exportName: String? = null,
+            inputTypes: Set<Class<*>> = setOf(UserInput::class.java),
+        ): Agent {
+            val agent = exportedEvenMoreEvilWizard()
+            return agent.copy(name = owner, goals = agent.goals.map {
+                it.copy(name = goalName, export = it.export.copy(name = exportName, startingInputTypes = inputTypes))
+            }.toSet())
+        }
+
+        private fun factory(vararg agents: Agent): PerGoalToolFactory {
+            val platform = IntegrationTestUtils.dummyAgentPlatform().apply { agents.forEach { deploy(it) } }
+            return PerGoalToolFactory(
+                Autonomy(platform, RandomRanker(), forAutonomyTesting()), "testApp",
+                goalToolNamingStrategy = ApplicationNameGoalToolNamingStrategy("testApp"),
+            )
+        }
+
+        private fun assertReported(output: CapturedOutput, vararg fragments: String) {
+            val errors = output.all.lines().filter { "ERROR" in it && fragments.all(it::contains) }
+            assertEquals(1, errors.size, "Expected one collision report in:\n${output.all}")
         }
     }
 
