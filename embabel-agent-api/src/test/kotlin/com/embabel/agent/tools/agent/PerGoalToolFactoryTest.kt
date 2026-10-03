@@ -25,6 +25,9 @@ import com.embabel.agent.test.integration.RandomRanker
 import com.embabel.agent.test.integration.forAutonomyTesting
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
+import com.embabel.agent.api.dsl.EvilWizardAgent
+import org.junit.jupiter.api.Nested
+import org.junit.jupiter.api.Disabled
 
 
 class PerGoalToolFactoryTest {
@@ -208,4 +211,33 @@ class PerGoalToolFactoryTest {
         }
     }
 
+    /** Select the future opt-in FQN policy before enabling these #1990 requirements. */
+    @Nested
+    inner class PublishedFqnNames {
+
+        @Test
+        @Disabled("#1990")
+        fun `generated tools preserve distinct qualified goals and source names`() {
+            val original = exportedEvenMoreEvilWizard()
+            val names = listOf(EvilWizardAgent.name, original.name).sorted()
+            val goalName = "com.myco.MyAgent.myGoal"
+            val goals = listOf(goalName, goalName.removePrefix("com.myco."))
+            val sources = goals.mapIndexed { index, name ->
+                original.copy(name = names[index], goals = original.goals.map {
+                    it.copy(name = name)
+                }.toSet())
+            }
+            val agentPlatform = IntegrationTestUtils.dummyAgentPlatform()
+            sources.forEach { agentPlatform.deploy(it) }
+            val autonomy = Autonomy(agentPlatform, RandomRanker(), forAutonomyTesting())
+            val factory = PerGoalToolFactory(autonomy, "testApp")
+
+            val tools = factory.goalTools(remoteOnly = true, listeners = emptyList())
+            assertEquals(goals, tools.map { it.goal.name })
+            assertEquals(goals, sources.map { it.goals.single().name })
+            assertEquals(names, sources.map { it.name })
+            sources.forEach { assertEquals(original.actions.map { it.name }, it.actions.map { action -> action.name }) }
+            assertEquals(2, tools.map { it.definition.name }.distinct().size)
+        }
+    }
 }

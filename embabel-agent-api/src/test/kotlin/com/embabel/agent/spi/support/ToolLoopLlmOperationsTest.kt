@@ -78,12 +78,87 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Nested
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
+import com.embabel.agent.api.annotation.support.AgentMetadataReader
+import com.embabel.agent.api.annotation.support.CurriedActionTool
+import com.embabel.agent.api.annotation.support.SupervisorAction
+import com.embabel.agent.api.annotation.support.supervisor.SupervisorWith2
+import com.embabel.agent.api.dsl.EvilWizardAgent
+import com.embabel.agent.api.dsl.evenMoreEvilWizard
+import com.embabel.agent.core.Agent
+import com.embabel.agent.core.Action
+import com.embabel.agent.core.support.InMemoryBlackboard
+import org.junit.jupiter.api.Assertions.assertInstanceOf
+import org.junit.jupiter.api.Disabled
 
 /**
  * Tests for [ToolLoopLlmOperations] directly, testing the framework-agnostic
  * tool loop orchestration logic.
  */
 class ToolLoopLlmOperationsTest {
+
+    /** Select the future opt-in FQN policy before enabling these #1990 requirements. */
+    @Nested
+    inner class PublishedFqnNames {
+
+        @Test
+        @Disabled("#1990")
+        fun `agent ownership determines names across providers and calling actions`() {
+            val searchTool = TestTool("search", "Search") { Tool.Result.text("found") }
+            val published = listOf(EvilWizardAgent, evenMoreEvilWizard()).map { source ->
+                val name = source.name
+                val actions = source.actions.map { it.name }
+                val goals = source.goals.map { it.name }
+                val callers = source.actions.take(2)
+                assertEquals(2, callers.map { it.name }.distinct().size)
+                val names = callers.flatMap { action ->
+                    listOf("provider", "custom-provider").map { publishedNames(source, listOf(searchTool), it, action) }
+                }
+                assertEquals(1, names.distinct().size, "Provider and caller must not change the published name")
+                assertEquals(name, source.name)
+                assertEquals(actions, source.actions.map { it.name })
+                assertEquals(goals, source.goals.map { it.name })
+                names.first().single()
+            }
+            assertEquals("search", searchTool.definition.name)
+            assertEquals(2, published.distinct().size, "Different owners require distinct names")
+        }
+
+        @Test
+        @Disabled("#1990")
+        fun `supervisor publication preserves its agent action and goal metadata`() {
+            val source = assertInstanceOf(Agent::class.java, AgentMetadataReader().createAgentMetadata(SupervisorWith2()))
+            val action = assertInstanceOf(SupervisorAction::class.java, source.actions.single())
+            val actions = action.toolActions.map { it.name }
+            val goals = source.goals.map { it.name }
+            val tools = CurriedActionTool.createTools(action.toolActions, InMemoryBlackboard(), objectMapper)
+            val names = publishedNames(source, tools, "provider", action)
+            assertEquals("SupervisorWith2", source.name)
+            assertEquals(actions, action.toolActions.map { it.name })
+            assertEquals(goals, source.goals.map { it.name })
+            assertEquals(tools.size, names.size)
+            assertTrue(names.all { it.contains(source.name) }, "Published supervisor tools require their agent owner")
+        }
+
+        private fun publishedNames(source: Agent, tools: List<Tool>, provider: String, action: Action): List<String> {
+            val sentTools = slot<List<Tool>>()
+            val sender = mockk<LlmMessageSender>()
+            every { sender.call(any(), capture(sentTools)) } returns textResponse("done")
+            val operations = createTestableOperations(sender)
+            every { mockAgentProcess.agent } returns source
+            every { mockModelProvider.getLlm(any()) } returns SpringAiLlmService(
+                "test", provider, FakeChatModel("unused"), DefaultOptionsConverter,
+            )
+            operations.createObject(
+                messages = listOf(UserMessage("Use the tools")), interaction = createInteraction(tools),
+                outputClass = String::class.java, agentProcess = mockAgentProcess, action = action,
+            )
+            verify(exactly = 1) { sender.call(any(), any()) }
+            val names = sentTools.captured.map { it.definition.name }
+            val event = eventListener.processEvents.filterIsInstance<LlmRequestEvent<*>>().last()
+            assertEquals(event.interaction.tools.map { it.definition.name }, names)
+            return names
+        }
+    }
 
     private lateinit var mockModelProvider: ModelProvider
     private lateinit var mockAgentProcess: AgentProcess
