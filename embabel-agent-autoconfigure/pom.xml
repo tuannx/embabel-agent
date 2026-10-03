@@ -44,6 +44,7 @@
         <module>models/embabel-agent-dashscope-autoconfigure</module>
         <module>models/embabel-agent-mistral-ai-autoconfigure</module>
         <module>models/embabel-agent-onnx-autoconfigure</module>
+        <module>models/embabel-agent-typesafe-autoconfigure</module>
     </modules>
 
     <dependencies>

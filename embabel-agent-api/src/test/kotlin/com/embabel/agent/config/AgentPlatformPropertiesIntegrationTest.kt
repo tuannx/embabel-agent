@@ -16,6 +16,7 @@
 package com.embabel.agent.config
 
 import com.embabel.agent.api.common.autonomy.AutonomyProperties
+import com.embabel.agent.api.common.ranking.RankingStrategy
 import com.embabel.agent.spi.config.spring.AgentPlatformProperties
 import com.embabel.agent.spi.support.DefaultProcessIdGeneratorProperties
 import org.assertj.core.api.Assertions.assertThat
@@ -166,6 +167,7 @@ import org.springframework.test.context.TestPropertySource
         "embabel.agent.platform.scanning.bean=true",
         "embabel.agent.platform.ranking.max-attempts=15",
         "embabel.agent.platform.ranking.backoff-millis=200",
+        "embabel.agent.platform.ranking.strategy=jev",
         "embabel.agent.platform.autonomy.agent-confidence-cut-off=0.8",
         "embabel.agent.platform.autonomy.goal-confidence-cut-off=0.7",
         "embabel.agent.platform.process-id-generation.include-version=true",
@@ -240,6 +242,7 @@ class AgentPlatformPropertiesIntegrationTest {
     fun `should bind ranking properties correctly`() {
         assertThat(properties.ranking.maxAttempts).isEqualTo(15)
         assertThat(properties.ranking.backoffMillis).isEqualTo(200L)
+        assertThat(properties.ranking.strategy).isEqualTo(RankingStrategy.JEV)
     }
 
     @Test

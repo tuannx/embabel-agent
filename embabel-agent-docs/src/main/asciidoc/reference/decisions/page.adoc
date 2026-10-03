@@ -1,0 +1,282 @@
+[[reference.decisions]]
+=== Bounded Decisions with TypeSafe Jev
+
+Embabel can answer narrow, typed questions about application state through https://docs.typesafe.ai[TypeSafe Jev],
+a System One model. Jev is not an LLM: you send state with typed questions and get structured answers back.
+No text generation, no tool calls, no planning.
+
+Three question types are supported:
+
+- `noul`: is this statement true? Returns P(yes) from 0 to 1.
+- `choice`: pick one option from a list. Returns the label, the full probability distribution, and confidence.
+- `score`: rate the state against ordered levels. Returns the weighted value, the level distribution, and confidence.
+
+==== When to Use This vs PromptRunner
+
+[cols="1,1,1", options="header", frame="all", grid="all"]
+|===
+|Need |Use |Why
+
+|Decide between known options, gate on a threshold, rank candidates
+|`context.decisions()`, `DecisionCondition`, automatic ranking
+|Calibrated probabilities in ~70-500ms, no parsing, cheap enough to call often
+
+|Generate text, extract objects, call tools, plan multi-step work
+|`PromptRunner`
+|Only an LLM can produce open-ended output and drive tool loops
+|===
+
+Never use Jev for `generateText`, `createObject`, tool loops, or planning. It is wired only into
+bounded judgments: ranking, conditions, and the small `decisions()` API on `OperationContext`.
+
+In short: use Jev where you would otherwise write a smart if statement; use an LLM where
+you need language and deep reasoning. Jev does not replace the LLM — it replaces the places
+where an LLM was previously used just to make a small decision.
+
+==== Use Cases in Embabel
+
+Where bounded decisions land in this codebase:
+
+[cols="1,1,1", options="header", frame="all", grid="all"]
+|===
+|Use case |Embabel home |Status
+
+|Agent and goal ranking
+|`Autonomy` via `DecisionRanker`
+|Done. Strategy `auto`/`jev`/`llm` per deployment.
+
+|Condition judgments for planning
+|`DecisionCondition`
+|Done. Noul over blackboard state against the platform cut-off.
+
+|Bulk classification in `@Action`
+|`decisions()`, as in the ticket example above
+|Done.
+
+|Stuck-loop and progress detection
+|`DecisionCondition` recipe
+|Done. See below.
+
+|Context keep-or-drop triage
+|`decisions()` inside `@Action`
+|Done. One noul judgment per item beats re-summarizing whole conversations.
+
+|Output guardrail screening
+|`decisions()` before the next step
+|Next. Offered as the follow-up integration.
+
+|Pre-tool risk screening
+|`ToolDecorator` wrapping invocation
+|Follow-up. Needs blocking semantics that terminate rather than retry.
+
+|RAG reranking
+|RAG pipeline filter stage
+|Follow-up. Lives in the RAG modules, separate from this integration.
+|===
+
+Explicitly out of scope: realtime game/robotics loops, per-step browser/computer-use
+planning, model routing (the resolver carries no task context), and intent-based tool
+selection (the resolver is role-based). Jev stays out of tool loops and planning.
+
+A stuck-loop detector needs no new code — it is one condition:
+
+[source,kotlin]
+----
+DecisionCondition(
+    name = "stuckLooping",
+    state = { context -> context.objects.map { it::class.simpleName } },
+    instructions = "Is the agent repeating the same steps without making progress?",
+)
+----
+
+==== Add the Dependency
+
+[tabs]
+====
+Maven::
++
+[source,xml]
+----
+<dependency>
+    <groupId>com.embabel.agent</groupId>
+    <artifactId>embabel-agent-starter-typesafe</artifactId>
+</dependency>
+----
+
+Gradle (Kotlin)::
++
+[source,kotlin]
+----
+implementation("com.embabel.agent:embabel-agent-starter-typesafe")
+----
+
+Gradle (Groovy)::
++
+[source,groovy]
+----
+implementation 'com.embabel.agent:embabel-agent-starter-typesafe'
+----
+====
+
+==== Configuration
+
+Set the API key via environment variable (recommended) or property:
+
+[source,bash]
+----
+export TYPESAFE_API_KEY=your-api-key
+----
+
+[source,yaml]
+----
+embabel:
+  agent:
+    platform:
+      decision:
+        typesafe:
+          api-key: your-api-key
+          model: jev-latest
+          read-timeout: 3s
+----
+
+Without a key the stack is inert: ranking keeps the LLM ranker, `decisions()` reports
+`isAvailable == false`, and conditions evaluate to UNKNOWN. Jev failures while ranking
+fail open to the LLM ranker. Each call publishes a `DecisionUsageEvent` with token counts
+and latency only; state and keys are never logged.
+
+==== Ranking Strategy
+
+Which brain performs agent and goal ranking is configurable per deployment:
+
+[source,yaml]
+----
+embabel:
+  agent:
+    platform:
+      ranking:
+        strategy: auto   # auto | jev | llm
+----
+
+- `auto` (default): bounded choice judgments when a decision backend is available, failing open to the LLM ranker otherwise.
+- `jev`: require the decision backend and fail fast without it — use to surface a missing key or quota problem at startup instead of silently ranking with the LLM.
+- `llm`: always use the LLM ranker, even when a decision backend is available — use for debugging or quality comparison.
+
+==== Benchmark
+
+What each integration step costs is reported by tests, not claimed here. Run them with:
+
+[source,bash]
+----
+mvn test -Dtest='DecisionBenchmarkTest' -pl embabel-agent-api
+mvn test -Dtest='TypeSafeBenchmarkTest' -pl embabel-agent-autoconfigure/models/embabel-agent-typesafe-autoconfigure
+----
+
+Method: transports are stubbed (in-memory fakes, MockWebServer on localhost), so timings
+cover Embabel's integration code only. No test touches the live TypeSafe API or spends
+anything: the suites need no keys and run in seconds. Live latency is modeled from
+published figures — Jev answers in ~70-500ms per call with questions evaluated in
+parallel, so batching barely changes response time, versus seconds for an LLM call
+with tools and structured output.
+
+Sample run (CI-class hardware, 20 goals, 12 mixed questions):
+
+[cols="1,1,1,1", options="header", frame="all", grid="all"]
+|===
+|Step |Measured |Calls |Modelled production
+
+|Ranking via `DecisionRanker`
+|~100ms glue
+|1 judgment call
+|One ~70-500ms Jev call; LLM prompt for the same task measured ~1.6KB (~410 input tokens)
+
+|Ranking via `LlmRanker`
+|~20ms glue
+|1 LLM call
+|Seconds per call plus output tokens for the rankings object
+
+|`DecisionCondition` evaluation
+|~0.02ms glue each
+|1 short Jev call only when evaluated
+|One ~70-500ms call versus one full LLM object-creation call
+
+|12 mixed questions via `TypeSafeDecisionProvider`
+|~66ms localhost round-trip, ~1.1KB request (~270 input tokens)
+|1 HTTP request
+|Same single call at ~70-500ms regardless of question count
+|===
+
+Takeaway: the integration overhead is negligible next to any model call; batching keeps
+multi-question judgments at one short call; and the Jev ranking request carries roughly
+the same order of input as the LLM prompt it replaces while returning calibrated
+distributions the autonomy cut-offs consume directly.
+
+==== Ask from @Action Code
+
+[tabs]
+====
+Java::
++
+[source,java]
+----
+var answer = context.decisions().noul(ticket.getText(), "Does this message express urgency?");
+if (answer.getNoul() > 0.8) {
+    escalate(ticket);
+}
+
+var team = context.decisions().choice(
+    ticket.getText(),
+    "Which team should handle this",
+    Map.of("billing", "Payment or subscription issues",
+           "technical", "Bugs or integration problems"));
+route(ticket, team.getChoice(), team.getConfidence());
+----
+
+Kotlin::
++
+[source,kotlin]
+----
+val urgency = context.decisions().noul(ticket.text, "Does this message express urgency?")
+if (urgency.noul > 0.8) {
+    escalate(ticket)
+}
+
+val team = context.decisions().choice(
+    state = ticket.text,
+    instructions = "Which team should handle this",
+    criteria = mapOf("billing" to "Payment or subscription issues",
+                     "technical" to "Bugs or integration problems"),
+)
+route(ticket, team.choice, team.confidence)
+----
+====
+
+==== Gate Planning with a Condition
+
+`DecisionCondition` is the bounded counterpart to `PromptCondition`: one yes/no judgment
+over rendered state, compared against a threshold that defaults to the platform
+confidence cut-off.
+
+[tabs]
+====
+Java::
++
+[source,java]
+----
+new DecisionCondition(
+    "urgentTicket",
+    context -> latestTicketText(context),
+    "Does this message express urgency?",
+    0.6);
+----
+
+Kotlin::
++
+[source,kotlin]
+----
+DecisionCondition(
+    name = "urgentTicket",
+    state = { context -> context.last(Ticket::class.java)?.text ?: "" },
+    instructions = "Does this message express urgency?",
+)
+----
+====
