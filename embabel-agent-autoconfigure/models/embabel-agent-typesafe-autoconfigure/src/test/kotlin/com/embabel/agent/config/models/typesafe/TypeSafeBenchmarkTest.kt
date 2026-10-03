@@ -91,8 +91,7 @@ class TypeSafeBenchmarkTest {
         println(
             "[benchmark] jev call: ${questions.size} mixed questions in 1 HTTP request, " +
                 "${roundTripMs}ms localhost round-trip, request=${requestBytes} bytes " +
-                "(~${requestBytes / 4} input tokens); " +
-                "production adds ~70-500ms Jev latency regardless of question count"
+                "(~${requestBytes / 4} input tokens)"
         )
     }
 }

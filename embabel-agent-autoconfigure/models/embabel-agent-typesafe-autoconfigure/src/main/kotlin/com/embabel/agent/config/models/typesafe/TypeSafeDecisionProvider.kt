@@ -115,7 +115,7 @@ class TypeSafeDecisionProvider(
                 e.statusCode,
             )
             throw IllegalStateException(
-                "TypeSafe request failed with status ${e.statusCode}: ${e.responseBodyAsString}",
+                "TypeSafe request failed with status ${e.statusCode}",
                 e,
             )
         } catch (e: IllegalStateException) {

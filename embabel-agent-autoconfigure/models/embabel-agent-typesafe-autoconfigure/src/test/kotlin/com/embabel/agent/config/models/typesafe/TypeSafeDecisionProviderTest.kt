@@ -225,6 +225,7 @@ class TypeSafeDecisionProviderTest {
             }
             assertTrue(failure.message!!.contains("401"))
             assertFalse(failure.message!!.contains("test-key"))
+            assertFalse(failure.message!!.contains("Invalid key"))
         }
 
         @Test

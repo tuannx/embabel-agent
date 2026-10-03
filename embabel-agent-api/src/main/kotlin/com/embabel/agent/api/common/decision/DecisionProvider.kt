@@ -45,9 +45,6 @@ interface DecisionProvider {
         questions: Map<String, @JvmSuppressWildcards DecisionQuestion>,
     ): DecisionAnswers
 
-    /**
-     * Probability the answer to this yes/no question is yes, between 0 and 1.
-     */
     fun noul(
         state: Any,
         instructions: String,
@@ -55,6 +52,7 @@ interface DecisionProvider {
 
     /**
      * Probability the answer to this yes/no question is yes, between 0 and 1.
+     * The two-argument overload omits [yes] and [no].
      * @param yes what a yes near 1 means
      * @param no what a no near 0 means
      */
