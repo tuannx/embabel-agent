@@ -24,7 +24,11 @@ import com.embabel.agent.spi.loop.RequiredToolGroupException
 import com.embabel.agent.spi.support.RegistryToolGroupResolver
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Nested
+import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.extension.ExtendWith
+import org.springframework.boot.test.system.CapturedOutput
+import org.springframework.boot.test.system.OutputCaptureExtension
 import org.junit.jupiter.api.assertThrows
 
 /**
@@ -61,6 +65,21 @@ class ToolConsumerTest {
 
     @Nested
     inner class ResolveToolsTest {
+
+        @Test
+        @Disabled("#1834")
+        @ExtendWith(OutputCaptureExtension::class)
+        fun `direct and group tool collisions report both implementations`(output: CapturedOutput) {
+            val directTool = createMockTool("search", "direct search implementation")
+            val groupTool = createMockTool("search", "group search implementation")
+            val resolver = RegistryToolGroupResolver("test", listOf(createToolGroup("search", listOf(groupTool))))
+            val consumer = createToolConsumer("consumer", listOf(directTool), setOf(ToolGroupRequirement("search")))
+            assertEquals(listOf(directTool), consumer.resolveTools(resolver))
+            val errors = output.all.lines().filter {
+                "ERROR" in it && listOf("search", "direct search implementation", "group search implementation").all(it::contains)
+            }
+            assertEquals(1, errors.size, "Expected one collision report in:\n${output.all}")
+        }
 
         @Test
         fun `resolveTools returns direct tools when no tool groups`() {
@@ -512,10 +531,10 @@ class ToolConsumerTest {
         toolGroups = emptyList(),
     )
 
-    private fun createMockTool(name: String): Tool = object : Tool {
+    private fun createMockTool(name: String, description: String = "Mock tool $name"): Tool = object : Tool {
         override val definition = Tool.Definition(
             name = name,
-            description = "Mock tool $name",
+            description = description,
             inputSchema = Tool.InputSchema.empty(),
         )
 

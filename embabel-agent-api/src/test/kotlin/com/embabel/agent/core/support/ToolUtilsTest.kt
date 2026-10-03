@@ -15,6 +15,12 @@
  */
 package com.embabel.agent.core.support
 
+import org.junit.jupiter.api.Disabled
+import org.junit.jupiter.api.extension.ExtendWith
+import org.springframework.boot.test.system.CapturedOutput
+import org.springframework.boot.test.system.OutputCaptureExtension
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.EnumSource
 import com.embabel.agent.api.tool.Tool
 import com.embabel.agent.api.tool.ToolObject
 import com.embabel.common.util.StringTransformer
@@ -218,6 +224,34 @@ class ToolUtilsTest {
 
             assertEquals("alpha", tools[0].definition.name)
             assertEquals("zulu", tools[1].definition.name)
+        }
+    }
+
+    enum class Collision { ACROSS_OBJECTS, AFTER_RENAMING }
+
+    @Nested
+    @ExtendWith(OutputCaptureExtension::class)
+    inner class CollisionDiagnostics {
+
+        @ParameterizedTest
+        @EnumSource(Collision::class)
+        @Disabled("#1834")
+        fun `extraction reports both implementations and retains the first route`(collision: Collision, output: CapturedOutput) {
+            val renamed = collision == Collision.AFTER_RENAMING
+            val tool1 = createMockTool(if (renamed) "tool1" else "duplicate-name", "First tool") { Tool.Result.text("1") }
+            val tool2 = createMockTool(if (renamed) "tool2" else "duplicate-name", "Second tool") { Tool.Result.text("2") }
+            val tools = when (collision) {
+                Collision.ACROSS_OBJECTS -> safelyGetTools(listOf(ToolObject(tool1), ToolObject(tool2)))
+                Collision.AFTER_RENAMING -> safelyGetToolsFrom(ToolObject(listOf(tool1, tool2), namingStrategy = { "duplicate-name" }))
+            }
+            assertEquals(listOf("duplicate-name"), tools.map { it.definition.name })
+            if (!renamed) assertEquals(listOf(tool1), tools)
+            assertEquals("1", assertInstanceOf(Tool.Result.Text::class.java, tools.single().call("{}")).content)
+            assertEquals(if (renamed) "tool1" else "duplicate-name", tool1.definition.name)
+            assertEquals(if (renamed) "tool2" else "duplicate-name", tool2.definition.name)
+            val fragments = listOf("duplicate-name", tool1.definition.name, tool2.definition.name, "First tool", "Second tool")
+            val errors = output.all.lines().filter { "ERROR" in it && fragments.all(it::contains) }
+            assertEquals(1, errors.size, "Expected one collision report in:\n${output.all}")
         }
     }
 

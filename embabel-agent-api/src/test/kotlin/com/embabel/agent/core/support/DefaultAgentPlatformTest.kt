@@ -15,6 +15,24 @@
  */
 package com.embabel.agent.core.support
 
+import org.junit.jupiter.api.Disabled
+import org.junit.jupiter.api.extension.ExtendWith
+import org.springframework.boot.test.system.CapturedOutput
+import org.springframework.boot.test.system.OutputCaptureExtension
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.EnumSource
+import com.embabel.agent.api.annotation.support.AgentMetadataReader
+import com.embabel.agent.api.dsl.agent
+import com.embabel.agent.core.Agent as CoreAgent
+import com.embabel.agent.domain.io.UserInput
+import com.embabel.agent.api.annotation.Action
+import com.embabel.agent.api.annotation.AchievesGoal
+import com.embabel.agent.api.annotation.Agent
+import com.embabel.agent.api.annotation.support.AgentWithValidAchievesGoalMethod as ExistingAgentWithValidAchievesGoalMethod
+import com.embabel.agent.api.dsl.EvilWizardAgent
+import com.embabel.agent.api.dsl.MagicVictim
+import com.embabel.agent.api.dsl.evenMoreEvilWizardWithStructuredInput
+import org.springframework.context.annotation.Profile
 import com.embabel.agent.api.channel.DevNullOutputChannel
 import com.embabel.common.util.EmbabelObjectMapperHolder
 import com.embabel.agent.api.common.PlatformServices
@@ -113,6 +131,75 @@ class DefaultAgentPlatformTest {
             assertNotNull(subclassed.platformServices)
             assertInstanceOf(CustomPlatformServices::class.java, subclassed.platformServices)
         }
+    }
+
+    enum class Capability(val sharedName: String) { GOAL("done"), ACTION("thing"), CONDITION("testCondition") }
+
+    @Nested
+    @ExtendWith(OutputCaptureExtension::class)
+    inner class DuplicateNames {
+
+        @Test
+        @Disabled("#1834")
+        fun `annotated agents sharing a simple class name report both packages`(output: CapturedOutput) {
+            val reader = AgentMetadataReader()
+            val agent = assertInstanceOf(CoreAgent::class.java, reader.createAgentMetadata(ExistingAgentWithValidAchievesGoalMethod()))
+            val duplicate = assertInstanceOf(CoreAgent::class.java, reader.createAgentMetadata(AgentWithValidAchievesGoalMethod()))
+            assertEquals("AgentWithValidAchievesGoalMethod", agent.name)
+            assertEquals(agent.name, duplicate.name)
+            val platform = raw()
+            platform.deploy(agent)
+            platform.deploy(duplicate)
+            assertEquals(listOf(duplicate), platform.agents())
+            assertEquals(duplicate.goals, platform.goals)
+            assertReported(output, agent.name, ExistingAgentWithValidAchievesGoalMethod::class.java.name, AgentWithValidAchievesGoalMethod::class.java.name)
+        }
+
+        @ParameterizedTest
+        @EnumSource(Capability::class)
+        @Disabled("#1834")
+        fun `same named capabilities across agents report both owners`(capability: Capability, output: CapturedOutput) {
+            val sharedName = capability.sharedName
+            fun source(owner: String) = agent(owner, description = owner) {
+                val condition by conditionOf(name = if (capability == Capability.CONDITION) sharedName else "$owner.testCondition") { true }
+                transformation<UserInput, MagicVictim>(name = if (capability == Capability.ACTION) sharedName else "$owner.thing") { MagicVictim("Hamish") }
+                goal(
+                    name = if (capability == Capability.GOAL) sharedName else "$owner.done",
+                    description = owner,
+                    satisfiedBy = MagicVictim::class,
+                )
+            }
+            val (first, second, third) = listOf(EvilWizardAgent, evenMoreEvilWizard(), evenMoreEvilWizardWithStructuredInput())
+                .map { source(it.name) }.sortedBy { it.name }
+            val platform = raw()
+            platform.deploy(third)
+            platform.deploy(second)
+            if (capability == Capability.GOAL) assertEquals(second.goals, platform.goals)
+            platform.deploy(first)
+            assertEquals(listOf(first, second, third), platform.agents())
+            when (capability) {
+                Capability.GOAL -> assertEquals(first.goals, platform.goals)
+                Capability.ACTION -> assertEquals(first.actions, platform.actions)
+                Capability.CONDITION -> assertEquals(first.conditions, platform.conditions)
+            }
+            assertReported(output, sharedName, first.name, second.name, third.name)
+        }
+
+        private fun assertReported(output: CapturedOutput, vararg fragments: String) {
+            val identifiers = fragments.map { Regex("\\b${Regex.escape(it)}\\b") }
+            val errors = output.all.lines().filter { line ->
+                "ERROR" in line && identifiers.all { it.containsMatchIn(line) }
+            }
+            assertEquals(1, errors.size, "Expected one collision report in:\n${output.all}")
+        }
+    }
+
+    @Agent(description = "valid goal method")
+    @Profile("issue1834-fixtures")
+    class AgentWithValidAchievesGoalMethod {
+        @Action
+        @AchievesGoal(description = "goal")
+        fun goal(input: UserInput): String = "dummy"
     }
 
 }

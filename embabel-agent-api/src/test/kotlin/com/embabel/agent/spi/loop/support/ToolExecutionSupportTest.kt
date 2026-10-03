@@ -15,6 +15,15 @@
  */
 package com.embabel.agent.spi.loop.support
 
+import org.junit.jupiter.api.Disabled
+import org.junit.jupiter.api.extension.ExtendWith
+import org.springframework.boot.test.system.CapturedOutput
+import org.springframework.boot.test.system.OutputCaptureExtension
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.EnumSource
+import org.junit.jupiter.api.Nested
+import org.slf4j.LoggerFactory
+import org.junit.jupiter.api.Assertions.assertInstanceOf
 import com.embabel.agent.api.tool.Tool
 import com.embabel.agent.api.tool.ToolCallContext
 import com.embabel.agent.api.tool.callback.AfterToolCallContext
@@ -32,6 +41,47 @@ import org.junit.jupiter.api.Test
 import tools.jackson.module.kotlin.jacksonObjectMapper
 
 class ToolExecutionSupportTest {
+
+    enum class Collision { EXISTING_TOOL, SAME_BATCH }
+
+    @Nested
+    @ExtendWith(OutputCaptureExtension::class)
+    inner class CollisionDiagnostics {
+
+        @ParameterizedTest
+        @EnumSource(Collision::class)
+        @Disabled("#1834")
+        fun `injection reports collisions after decoration and retains the first tool`(collision: Collision, output: CapturedOutput) {
+            val tool1 = MockTool("existing", "Existing") { Tool.Result.text("existing") }
+            val tool2 = MockTool("added", "Added") { Tool.Result.text("added") }
+            val decorated = MockTool("existing", tool2.definition.description) { tool2.call(it) }
+            val existing = collision == Collision.EXISTING_TOOL
+            val available = if (existing) mutableListOf<Tool>(tool1) else mutableListOf()
+            val injected = mutableListOf<Tool>()
+            val additions = if (existing) listOf(tool2) else listOf(tool1, tool2)
+            applyToolInjection(
+                toolCall = ToolCall("call-1", "source", "{}"),
+                resultContent = "{}",
+                conversationHistory = emptyList(),
+                availableTools = available,
+                iteration = 1,
+                injectionStrategy = object : ToolInjectionStrategy {
+                    override fun evaluate(context: ToolInjectionContext) = ToolInjectionResult(toolsToAdd = additions)
+                },
+                objectMapper = jacksonObjectMapper(),
+                toolDecorator = { if (it === tool2) decorated else it },
+                injectedTools = injected,
+                logger = LoggerFactory.getLogger(ToolExecutionSupportTest::class.java),
+            )
+            assertEquals(listOf(tool1), available)
+            assertEquals(if (existing) emptyList() else listOf(tool1), injected)
+            assertEquals("existing", assertInstanceOf(Tool.Result.Text::class.java, available.single().call("{}")).content)
+            assertEquals("added", tool2.definition.name)
+            val fragments = listOf("existing", "added", "Existing", "Added")
+            val errors = output.all.lines().filter { "ERROR" in it && fragments.all(it::contains) }
+            assertEquals(1, errors.size, "Expected one collision report in:\n${output.all}")
+        }
+    }
 
     @Test
     fun `executeTool returns content and publishes callbacks`() {

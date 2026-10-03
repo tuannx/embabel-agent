@@ -15,6 +15,11 @@
  */
 package com.embabel.agent.validation
 
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.EnumSource
+import org.junit.jupiter.api.Disabled
+import com.embabel.agent.core.ComputedBooleanCondition
+import com.embabel.common.core.validation.ValidationSeverity
 import com.embabel.agent.api.annotation.support.AgentMetadataReader
 import com.embabel.agent.api.annotation.support.AgentWithDuplicateActionNames
 import com.embabel.agent.api.dsl.evenMoreEvilWizard
@@ -65,4 +70,35 @@ class DefaultAgentStructureValidatorTest {
             )
         }
     }
+
+    enum class Capability { GOAL, CONDITION }
+
+    @Nested
+    inner class DuplicateCapabilities {
+
+        @ParameterizedTest
+        @EnumSource(Capability::class)
+        @Disabled("#1834")
+        fun `duplicate capability names produce a structured error`(capability: Capability) {
+            val original = evenMoreEvilWizard()
+            val goal = original.goals.first().copy(description = "first snake meal")
+            val name = if (capability == Capability.GOAL) goal.name else "testCondition"
+            val duplicate = when (capability) {
+                Capability.GOAL -> original.copy(goals = linkedSetOf(goal, goal.copy(description = "second snake meal")))
+                Capability.CONDITION -> original.copy(conditions = linkedSetOf(
+                    ComputedBooleanCondition(name = name) { _, _ -> true },
+                    ComputedBooleanCondition(name = name) { _, _ -> false },
+                ))
+            }
+            val result = validator().validate(duplicate)
+            assertEquals(false, result.isValid)
+            val error = result.errors.single()
+            assertEquals("DUPLICATE_${capability}_NAME", error.code)
+            assertEquals(ValidationSeverity.ERROR, error.severity)
+            val location = requireNotNull(error.location)
+            assertEquals(name, location.name)
+            assertEquals(duplicate.name, location.agentName)
+        }
+    }
+
 }
