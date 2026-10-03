@@ -16,8 +16,6 @@
 package com.embabel.agent.autoconfigure.models.typesafe;
 
 import com.embabel.agent.config.models.typesafe.TypeSafeDecisionConfig;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.AutoConfigureBefore;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -41,10 +39,4 @@ import org.springframework.context.annotation.Import;
         matchIfMissing = true)
 @Import(TypeSafeDecisionConfig.class)
 public class AgentTypeSafeAutoConfiguration {
-
-    private static final Logger logger = LoggerFactory.getLogger(AgentTypeSafeAutoConfiguration.class);
-
-    public AgentTypeSafeAutoConfiguration() {
-        logger.info("AgentTypeSafeAutoConfiguration about to proceed...");
-    }
 }

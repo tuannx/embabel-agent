@@ -41,16 +41,17 @@ import org.springframework.boot.context.properties.ConfigurationProperties
  * @param backoffMillis initial backoff time in milliseconds
  * @param backoffMultiplier multiplier for backoff time
  * @param backoffMaxInterval maximum backoff time in milliseconds
+ * @param strategy which ranker runs: auto, jev, or llm
  */
 @ConfigurationProperties(PREFIX)
 data class RankingProperties(
     val llm: String? = null,
-    val strategy: RankingStrategy = RankingStrategy.AUTO,
     override val maxAttempts: Int = 5,
     override val backoffMillis: Long = 100L,
     override val backoffMultiplier: Double = 5.0,
     override val backoffMaxInterval: Long = 180000L,
     override val propertyPrefix: String = PREFIX,
+    val strategy: RankingStrategy = RankingStrategy.AUTO,
 ) : RetryProperties {
     companion object {
         const val PREFIX: String  = "embabel.agent.platform.ranking"
