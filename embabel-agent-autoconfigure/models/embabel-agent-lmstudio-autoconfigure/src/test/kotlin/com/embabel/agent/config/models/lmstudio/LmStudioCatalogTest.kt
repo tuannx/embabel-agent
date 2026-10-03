@@ -13,20 +13,15 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.embabel.agent.core.support.duplicates.alpha
+package com.embabel.agent.config.models.lmstudio
 
-import com.embabel.agent.api.annotation.AchievesGoal
-import com.embabel.agent.api.annotation.Action
-import com.embabel.agent.api.annotation.Agent
-import com.embabel.agent.domain.io.UserInput
+import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Test
 
-data class Spell(val caster: String)
+class LmStudioCatalogTest {
 
-/** Shares its simple class name with the Wizard in the sibling package. */
-@Agent(description = "alpha wizard")
-class Wizard {
-
-    @Action
-    @AchievesGoal(description = "alpha spell cast")
-    fun cast(input: UserInput): Spell = Spell("alpha")
+    @Test
+    fun `ships no OpenAI model catalog that could shadow the real one`() {
+        assertNull(javaClass.classLoader.getResource("models/openai-models.yml"))
+    }
 }
