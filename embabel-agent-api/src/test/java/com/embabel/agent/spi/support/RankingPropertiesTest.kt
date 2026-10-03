@@ -1,5 +1,6 @@
 package com.embabel.agent.spi.support
 
+import com.embabel.agent.api.common.ranking.RankingStrategy
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
@@ -28,5 +29,27 @@ class RankingPropertiesTest {
         assertEquals(5.0, properties.backoffMultiplier)
         assertEquals(180000, properties.backoffMaxInterval)
         assertTrue(output.out.contains("Maximum attempts of 1 have been reached. The maximum attempt can be configured using property embabel.agent.platform.ranking.max-attempts"))
+    }
+
+    @Test
+    fun `positional constructor keeps historical order and strategy last`() {
+        val properties = RankingProperties(
+            null,
+            3,
+            100L,
+            5.0,
+            180000L,
+            RankingProperties.PREFIX,
+        )
+        val (llm, maxAttempts, backoffMillis, backoffMultiplier, backoffMaxInterval, propertyPrefix) = properties
+        assertEquals(null, llm)
+        assertEquals(3, maxAttempts)
+        assertEquals(100L, backoffMillis)
+        assertEquals(5.0, backoffMultiplier)
+        assertEquals(180000L, backoffMaxInterval)
+        assertEquals(RankingProperties.PREFIX, propertyPrefix)
+        assertEquals(RankingStrategy.AUTO, properties.strategy)
+        assertEquals(RankingStrategy.JEV, properties.copy(strategy = RankingStrategy.JEV).strategy)
+        assertEquals(3, properties.copy(strategy = RankingStrategy.LLM).maxAttempts)
     }
 }

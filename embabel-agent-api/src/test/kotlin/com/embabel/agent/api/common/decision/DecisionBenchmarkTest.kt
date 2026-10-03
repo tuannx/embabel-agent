@@ -36,8 +36,6 @@ import kotlin.test.assertEquals
  * counts, and request payload sizes as a proxy for input tokens.
  *
  * Transports are stubbed, so timings cover integration code only, not networks.
- * Live latency (Jev ~70-500ms flat per call including batched questions, versus
- * seconds for an LLM ranking call) is modeled in the docs from published figures.
  */
 class DecisionBenchmarkTest {
 
