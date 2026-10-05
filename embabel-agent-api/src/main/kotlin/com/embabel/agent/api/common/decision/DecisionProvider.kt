@@ -15,6 +15,9 @@
  */
 package com.embabel.agent.api.common.decision
 
+import com.embabel.agent.api.common.Asyncer
+import java.util.concurrent.CompletionException
+
 /**
  * Bounded, non-generative judgments over application state.
  *
@@ -44,6 +47,36 @@ interface DecisionProvider {
         state: Any,
         questions: Map<String, @JvmSuppressWildcards DecisionQuestion>,
     ): DecisionAnswers
+
+    /**
+     * Evaluate independent phases concurrently.
+     * Each phase is one [evaluate] call, so its questions stay in a single batched judgment.
+     * Results follow [phases] order. A failure in any phase fails the whole call.
+     * A later phase that needs an earlier answer is a separate call after this returns.
+     */
+    fun evaluatePhases(
+        phases: List<DecisionPhase>,
+        asyncer: Asyncer,
+    ): List<DecisionAnswers> = evaluatePhases(phases, asyncer, phases.size.coerceAtLeast(1))
+
+    /**
+     * @param maxConcurrency upper bound on phases in flight; questions inside a phase stay one call
+     */
+    fun evaluatePhases(
+        phases: List<DecisionPhase>,
+        asyncer: Asyncer,
+        maxConcurrency: Int,
+    ): List<DecisionAnswers> {
+        if (phases.isEmpty()) return emptyList()
+        require(maxConcurrency > 0) { "maxConcurrency must be positive" }
+        return try {
+            asyncer.parallelMap(phases, maxConcurrency) { phase ->
+                evaluate(phase.state, phase.questions)
+            }
+        } catch (e: CompletionException) {
+            throw e.cause ?: e
+        }
+    }
 
     fun noul(
         state: Any,
@@ -84,6 +117,15 @@ interface DecisionProvider {
     ): ScoreAnswer =
         evaluate(state, mapOf("question" to ScoreQuestion(instructions, criteria))).score("question")
 }
+
+/**
+ * One batch of questions judged together against one state.
+ * Questions in a phase share a single provider call.
+ */
+data class DecisionPhase(
+    val state: Any,
+    val questions: Map<String, @JvmSuppressWildcards DecisionQuestion>,
+)
 
 /**
  * One typed question to evaluate against a state.

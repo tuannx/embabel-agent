@@ -17,6 +17,8 @@ package com.embabel.agent.api.common
 
 import com.embabel.agent.api.common.support.DelegatingStreamingPromptRunner
 import com.embabel.agent.api.common.support.OperationContextDelegate
+import com.embabel.agent.api.common.decision.DecisionAnswers
+import com.embabel.agent.api.common.decision.DecisionPhase
 import com.embabel.agent.api.common.decision.DecisionProvider
 import com.embabel.agent.api.common.decision.DisabledDecisionProvider
 import com.embabel.agent.api.dsl.TypedAgentScopeBuilder
@@ -89,6 +91,22 @@ interface OperationContext : Blackboard, ToolGroupConsumer {
      */
     fun decisions(): DecisionProvider =
         processContext.platformServices.decisionProvider() ?: DisabledDecisionProvider
+
+    /**
+     * Judge independent phases at once. Each phase is one batched decision call.
+     * [maxConcurrency] limits how many phases run together through the platform asyncer.
+     */
+    fun decisionPhases(
+        phases: List<DecisionPhase>,
+        maxConcurrency: Int,
+    ): List<DecisionAnswers> = decisions().evaluatePhases(
+        phases,
+        processContext.platformServices.asyncer,
+        maxConcurrency,
+    )
+
+    fun decisionPhases(phases: List<DecisionPhase>): List<DecisionAnswers> =
+        decisionPhases(phases, phases.size.coerceAtLeast(1))
 
     /**
      * Create a prompt runner for this context.
