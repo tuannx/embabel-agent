@@ -17,6 +17,7 @@ package com.embabel.agent.api.common.decision
 
 import com.embabel.agent.api.common.Asyncer
 import java.util.concurrent.CompletionException
+import java.util.concurrent.Semaphore
 
 /**
  * Bounded, non-generative judgments over application state.
@@ -51,7 +52,8 @@ interface DecisionProvider {
     /**
      * Evaluate independent phases concurrently.
      * Each phase is one [evaluate] call, so its questions stay in a single batched judgment.
-     * Results follow [phases] order. A failure in any phase fails the whole call.
+     * Answers are stored by input index, so result order does not follow completion order.
+     * When several phases fail, the failure at the lowest index is thrown after every phase finishes.
      * A later phase that needs an earlier answer is a separate call after this returns.
      */
     fun evaluatePhases(
@@ -60,21 +62,48 @@ interface DecisionProvider {
     ): List<DecisionAnswers> = evaluatePhases(phases, asyncer, phases.size.coerceAtLeast(1))
 
     /**
-     * @param maxConcurrency upper bound on phases in flight; questions inside a phase stay one call
+     * @param maxConcurrency upper bound on phases in flight; must be positive. Questions inside a phase stay one call.
      */
     fun evaluatePhases(
         phases: List<DecisionPhase>,
         asyncer: Asyncer,
         maxConcurrency: Int,
     ): List<DecisionAnswers> {
-        if (phases.isEmpty()) return emptyList()
         require(maxConcurrency > 0) { "maxConcurrency must be positive" }
-        return try {
-            asyncer.parallelMap(phases, maxConcurrency) { phase ->
-                evaluate(phase.state, phase.questions)
+        if (phases.isEmpty()) return emptyList()
+        val answers = arrayOfNulls<DecisionAnswers>(phases.size)
+        val failures = arrayOfNulls<Throwable>(phases.size)
+        val permits = Semaphore(maxConcurrency)
+        val futures = phases.mapIndexed { index, phase ->
+            asyncer.async {
+                var acquired = false
+                try {
+                    permits.acquire()
+                    acquired = true
+                    answers[index] = evaluate(phase.state, phase.questions)
+                } catch (failure: Throwable) {
+                    failures[index] = failure
+                } finally {
+                    if (acquired) {
+                        permits.release()
+                    }
+                }
             }
-        } catch (e: CompletionException) {
-            throw e.cause ?: e
+        }
+        futures.forEach { future ->
+            try {
+                future.join()
+            } catch (completion: CompletionException) {
+                throw completion.cause ?: completion
+            }
+        }
+        failures.forEach { failure ->
+            if (failure != null) {
+                throw failure
+            }
+        }
+        return answers.map { answer ->
+            checkNotNull(answer) { "Missing decision answer for a completed phase" }
         }
     }
 

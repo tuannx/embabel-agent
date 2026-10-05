@@ -60,14 +60,7 @@ jobs:
           # Configure Testcontainers for Linux
           mkdir -p /home/runner
           echo "testcontainers.reuse.enable=true" > /home/runner/.testcontainers.properties
-
-          # Forks without a SonarCloud token still publish a green build.
-          # Upstream keeps SONAR_TOKEN and runs analysis unchanged.
-          if [ -z "$SONAR_TOKEN" ]; then
-            echo "SONAR_TOKEN is unset; skipping SonarCloud analysis"
-            exit 0
-          fi
-
+          
           # Run SonarCloud analysis
           mvn -P jacoco-code-coverage -B verify org.sonarsource.scanner.maven:sonar-maven-plugin:sonar -Dsonar.projectKey=embabel_embabel-agent
   
