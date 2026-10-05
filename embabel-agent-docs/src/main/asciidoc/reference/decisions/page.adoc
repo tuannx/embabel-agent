@@ -250,6 +250,39 @@ route(ticket, team.choice, team.confidence)
 ----
 ====
 
+==== Judge Independent Phases Concurrently
+
+Questions about the same state belong in one `evaluate` call. Independent states are phases.
+`decisionPhases` runs those phases through the platform asyncer. Each phase stays one batched
+judgment. Answers come back in phase order. A later phase that needs an earlier answer is another
+call after this one returns.
+
+[tabs]
+====
+Java::
++
+[source,java]
+----
+var answers = context.decisionPhases(List.of(
+    new DecisionPhase(billingTicket, Map.of("urgent", new NoulQuestion("Is this urgent?"))),
+    new DecisionPhase(techTicket, Map.of("urgent", new NoulQuestion("Is this urgent?")))
+), 4);
+----
+
+Kotlin::
++
+[source,kotlin]
+----
+val answers = context.decisionPhases(
+    phases = listOf(
+        DecisionPhase(billingTicket, mapOf("urgent" to NoulQuestion("Is this urgent?"))),
+        DecisionPhase(techTicket, mapOf("urgent" to NoulQuestion("Is this urgent?"))),
+    ),
+    maxConcurrency = 4,
+)
+----
+====
+
 ==== Gate Planning with a Condition
 
 `DecisionCondition` is the bounded counterpart to `PromptCondition`: one yes/no judgment

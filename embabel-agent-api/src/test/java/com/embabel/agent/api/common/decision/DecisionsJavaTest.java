@@ -16,12 +16,14 @@
 package com.embabel.agent.api.common.decision;
 
 import com.embabel.agent.experimental.primitive.DecisionCondition;
+import com.embabel.agent.spi.support.ExecutorAsyncer;
 import com.embabel.agent.test.unit.FakeOperationContext;
 import com.embabel.plan.common.condition.ConditionDetermination;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Executors;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -62,6 +64,22 @@ public class DecisionsJavaTest {
                 "Does this message express urgency?",
                 0.6);
         assertEquals(ConditionDetermination.TRUE, condition.evaluate(context));
+    }
+
+    @Test
+    public void phasesRunFromJava() {
+        var provider = new FixedDecisionProvider();
+        var executor = Executors.newFixedThreadPool(2);
+        try {
+            var phases = List.of(
+                    new DecisionPhase("billing", Map.of("question", new NoulQuestion("Urgent?"))),
+                    new DecisionPhase("technical", Map.of("question", new NoulQuestion("Urgent?"))));
+            var answers = provider.evaluatePhases(phases, new ExecutorAsyncer(executor), 2);
+            assertEquals(2, answers.size());
+            assertEquals(0.92, answers.get(0).noul("question").getNoul());
+        } finally {
+            executor.shutdownNow();
+        }
     }
 
     @Test
