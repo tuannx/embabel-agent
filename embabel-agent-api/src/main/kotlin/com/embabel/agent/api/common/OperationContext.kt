@@ -17,6 +17,10 @@ package com.embabel.agent.api.common
 
 import com.embabel.agent.api.common.support.DelegatingStreamingPromptRunner
 import com.embabel.agent.api.common.support.OperationContextDelegate
+import com.embabel.agent.api.common.decision.DecisionAnswers
+import com.embabel.agent.api.common.decision.DecisionPhase
+import com.embabel.agent.api.common.decision.DecisionProvider
+import com.embabel.agent.api.common.decision.DisabledDecisionProvider
 import com.embabel.agent.api.dsl.TypedAgentScopeBuilder
 import com.embabel.agent.api.event.AgenticEventListener
 import com.embabel.agent.api.identity.User
@@ -77,6 +81,32 @@ interface OperationContext : Blackboard, ToolGroupConsumer {
      * Get AI functionality for this context
      */
     fun ai(): Ai = OperationContextAi(this)
+
+    /**
+     * Bounded decisions against blackboard or domain state.
+     * Ask noul/choice/score questions for @Action and @Condition code to branch on.
+     * Unlike promptRunner, this never generates text, calls tools, or plans.
+     * Returns the disabled provider when no decision backend is configured;
+     * guard usage with DecisionProvider.isAvailable.
+     */
+    fun decisions(): DecisionProvider =
+        processContext.platformServices.decisionProvider() ?: DisabledDecisionProvider
+
+    /**
+     * Judge independent phases at once. Each phase is one batched decision call.
+     * [maxConcurrency] limits how many phases run together through the platform asyncer.
+     */
+    fun decisionPhases(
+        phases: List<DecisionPhase>,
+        maxConcurrency: Int,
+    ): List<DecisionAnswers> = decisions().evaluatePhases(
+        phases,
+        processContext.platformServices.asyncer,
+        maxConcurrency,
+    )
+
+    fun decisionPhases(phases: List<DecisionPhase>): List<DecisionAnswers> =
+        decisionPhases(phases, phases.size.coerceAtLeast(1))
 
     /**
      * Create a prompt runner for this context.

@@ -15,6 +15,7 @@
  */
 package com.embabel.agent.spi.config.spring
 
+import com.embabel.agent.api.common.ranking.RankingStrategy
 import com.embabel.agent.core.ActionQos
 import com.embabel.common.textio.template.JinjaProperties
 import org.springframework.boot.context.properties.ConfigurationProperties
@@ -108,6 +109,11 @@ class AgentPlatformProperties {
      * Ranking configuration with retry logic
      */
     class RankingConfig {
+        /**
+         * Which brain performs ranking: bounded choice judgments, the LLM ranker, or automatic
+         */
+        var strategy: RankingStrategy = RankingStrategy.AUTO
+
         /**
          * Name of the LLM to use for ranking, or null to use auto selection
          */

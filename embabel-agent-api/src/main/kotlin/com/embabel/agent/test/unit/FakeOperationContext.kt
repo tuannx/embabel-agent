@@ -18,6 +18,7 @@ package com.embabel.agent.test.unit
 import com.embabel.agent.api.common.ContextualPromptElement
 import com.embabel.agent.api.common.OperationContext
 import com.embabel.agent.api.common.PromptRunner
+import com.embabel.agent.api.common.decision.DecisionProvider
 import com.embabel.agent.api.tool.ToolObject
 import com.embabel.agent.core.Agent
 import com.embabel.agent.core.Blackboard
@@ -47,6 +48,7 @@ class FakeOperationContext(
     override val processContext: ProcessContext = dummyProcessContext(agent = agent),
     override val operation: Operation = FakeAction(name = "test"),
     override val toolGroups: Set<ToolGroupRequirement> = emptySet(),
+    private val decisionProvider: DecisionProvider? = null,
 ) : OperationContext, Blackboard by processContext.agentProcess {
 
     val promptRunner: FakePromptRunner = FakePromptRunner(
@@ -74,6 +76,18 @@ class FakeOperationContext(
     fun expectResponse(response: Any?) {
         promptRunner.expectResponse(response)
     }
+
+    override fun decisions(): DecisionProvider =
+        decisionProvider ?: super<OperationContext>.decisions()
+
+    fun withDecisionProvider(decisionProvider: DecisionProvider): FakeOperationContext =
+        FakeOperationContext(
+            agent = agent,
+            processContext = processContext,
+            operation = operation,
+            toolGroups = toolGroups,
+            decisionProvider = decisionProvider,
+        )
 
     override fun promptRunner(
         llm: LlmOptions,
