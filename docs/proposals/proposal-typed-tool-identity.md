@@ -7,9 +7,9 @@
 
 - **Leaf**: a concrete source of tools in its own module (RAG, Skills, MCP, code, ...).
 - **Wire name**: the final string the LLM sees and returns in a tool call.
-- **Namespacing**: how a leaf's tool names are combined with the leaf's own name to form wire
-  names. `Prefix`: `docs` + `search` -> `docs_search`. `Collapse`: the tool is the entry point,
-  so `memory` + `memory` -> `memory`. `None`: names are already final.
+- **ToolNamePolicy**: how a leaf's tool names are combined with the leaf's own name to form wire
+  names. `OwnerPrefixed`: `docs` + `search` -> `docs_search`. `OwnerNamed`: the tool is the entry point,
+  so `memory` + `memory` -> `memory`. `AsDeclared`: names are already final.
 - **Golden test**: a test that compares the full list of wire names per source against a
   checked-in file; any difference fails and must be reviewed on purpose.
 - **Characterization test**: a test that records what the code does today, including quirks,
@@ -73,7 +73,7 @@ matter for any change to naming:
   `RegistryToolGroupResolver` implements it by scanning `tg.tools.any { name == toolName }`.
   It maps a tool back to its group by raw name; a renamed tool would not be found.
 
-Conclusion: a group behaves like `Namespacing.None`, but two other components depend on its raw
+Conclusion: a group behaves like `ToolNamePolicy.AsDeclared`, but two other components depend on its raw
 names, so the catalog must keep the original name available (for example `Tool` -> original
 name + wire name) or those lookups must move to the catalog.
 
@@ -123,12 +123,19 @@ Spring AI, annotations) and the LLM wire.
 
 ```kotlin
 // domain
-sealed interface Namespacing {
-    data object None : Namespacing                    // names are already final
-    data class Prefix(val ns: String) : Namespacing   // docs + search -> docs_search
-    data class Collapse(val ns: String) : Namespacing // the tool is the entry point: memory -> memory
-    // Deprecated bridge for user-written strategies; removed after the deprecation period.
-    data class Custom(val transform: StringTransformer) : Namespacing
+/** How a source's tool names become wire names. Declared by the source, applied only by ToolCatalog. */
+sealed interface ToolNamePolicy {
+    /** Names are already final (MCP, Spring AI, ToolGroup): used exactly as given. */
+    data object AsDeclared : ToolNamePolicy
+
+    /** Each tool is named "<owner>_<tool>": owner "docs" + tool "search" -> docs_search. */
+    data class OwnerPrefixed(val owner: String) : ToolNamePolicy
+
+    /** The tool is the owner's entry point and is named exactly "<owner>": memory + memory -> memory. */
+    data class OwnerNamed(val owner: String) : ToolNamePolicy
+
+    /** Deprecated bridge for user-written StringTransformer strategies; removed after deprecation. */
+    data class LegacyTransform(val transform: StringTransformer) : ToolNamePolicy
 }
 
 // port, implemented by every source
@@ -137,7 +144,7 @@ interface ToolSource {
 }
 
 data class ToolContribution(
-    val namespacing: Namespacing,
+    val namePolicy: ToolNamePolicy,
     val tools: List<Tool>,            // simple names, not prefixed
     val children: List<ToolContribution> = emptyList(), // nested tools (unfolding)
     val promptNotes: String? = null,
@@ -155,22 +162,22 @@ data class ToolContribution(
 
 | Layer | Holds |
 |---|---|
-| Domain | `Tool`, `Namespacing` (later possibly `ToolId`) |
+| Domain | `Tool`, `ToolNamePolicy` (later possibly `ToolId`) |
 | Application | `ToolCatalog`: aggregation, namespacing decision, collision policy |
 | Port | `ToolSource` (`ToolPublisher` is a close existing precedent) |
 | Adapters | RAG, Skills, MCP, Spring AI, `UnfoldingReference` implement `ToolSource` |
 | Wire boundary | sanitization, allowed characters, per-provider length limits |
 
 `LlmReference` stops carrying sanitization in a default method. A plain reference maps to
-`Prefix`, `UnfoldingReference` to `Collapse`, final-name sources to `None`. This replaces the
+`OwnerPrefixed`, `UnfoldingReference` to `OwnerNamed`, final-name sources to `AsDeclared`. This replaces the
 idempotent guard in `namingStrategy` with explicit intent.
 
 ## 6. What this does and does not fix
 
-- `memory_memory`, `docs_docs`: sources say `Collapse`/`None`; nothing is guessed.
+- `memory_memory`, `docs_docs`: sources say `OwnerNamed`/`AsDeclared`; nothing is guessed.
 - Duplicate registration and wrapper-identity false positives: dedup uses the resolved name.
 - Prompt/catalog drift: both call `nameFor`.
-- Not fixed by types alone: a tool named `docs_search` inside a `Prefix("docs")` source still
+- Not fixed by types alone: a tool named `docs_search` inside an `OwnerPrefixed("docs")` source still
   becomes `docs_docs_search`; sources must supply simple names.
 - Joining with `_` is not injective (`(a_b, c)` and `(a, b_c)` both give `a_b_c`), so the
   collision check on wire names is required.
@@ -222,7 +229,7 @@ idempotent guard in `namingStrategy` with explicit intent.
    Leaves: `Tool`/`@LlmTool` via `ToolObject`, `ToolishRag`, `Skills` (+ script tools), memory,
    code/file references, `UnfoldingReference`, agentic tools, MCP export, MCP client /
    Spring AI callbacks, `ToolGroup`, `PerGoalToolFactory`.
-2. Add `Namespacing`, `ToolContribution`, `ToolCatalog` internally, used by
+2. Add `ToolNamePolicy`, `ToolContribution`, `ToolCatalog` internally, used by
    `PromptRunner.withReference` and `safelyGetTools`. `Tool` and `LlmReference` unchanged; an
    adapter converts `LlmReference` and `ToolObject`. Done when the `startsWith` guard is
    deleted and the step-1 tests pass untouched.
@@ -230,7 +237,7 @@ idempotent guard in `namingStrategy` with explicit intent.
    first); delete `Skills.sanitizeToolName`. `byWireName` replaces the linear `find` in
    `DefaultToolLoop` / `StreamingToolLoop`.
 4. Optional: introduce `ToolId`; deprecate `StringTransformer`, `RenamedTool`,
-   `Namespacing.Custom` and the `tools()` / `unprefixedTools()` split.
+   `ToolNamePolicy.LegacyTransform` and the `tools()` / `unprefixedTools()` split.
 
 Open question for maintainers: is a catalog-level refactor (step 2) acceptable before any
 change to the `Tool` interface?
