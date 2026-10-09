@@ -103,16 +103,36 @@ idempotent guard in `namingStrategy` with explicit intent.
 
 0. **This PR (stop-gap)**: single-path registration, idempotent guard, whitespace-safe
    `toolPrefix()`, inner-tool renaming for unfolding, collision warning. Known gaps are listed
-   in the review (log noise, wrapper-class names in warnings, inner-tool rename is a
-   behavior change). These heuristics are meant to be removed by step 2.
-1. Add `Namespacing`, `ToolContribution`, `ToolCatalog` internally, used by
+   in the PR description. These heuristics are meant to be removed by step 2.
+1. **Characterization tests (gate for everything below).** Tool names sent to the LLM are a
+   public contract (prompts, tests and integrations depend on them), so before any refactor
+   add integration tests per leaf that pin the final wire names, plus a golden file of
+   `source -> wire names` where any diff must be reviewed. Pin current behavior, including
+   known quirks (mark them as such), so a change is always intentional. Per leaf, at least:
+   - plain name; name equal to the prefix; name starting with `prefix_`; mixed case;
+   - reference names with spaces, punctuation, non-ASCII, empty/blank;
+   - two sources producing the same wire name (collision policy);
+   - `ToolObject.filter` combined with naming (filter sees the simple name, then naming);
+   - unfolding: outer and inner names, shortcut dispatch;
+   - MCP export with chained naming strategies;
+   - dynamic tools injected/removed by the tool loop;
+   - round trip: the wire name the LLM would return reaches the right function;
+   - names rendered in prompt text equal the names in the catalog.
+   Leaves covered: `Tool`/`@LlmTool` via `ToolObject`, `ToolishRag`, `Skills` (+ script tools),
+   DICE memory, code/file references, `UnfoldingReference`, agentic tools, MCP export,
+   MCP client / Spring AI callbacks, `PerGoalToolFactory`.
+2. Add `Namespacing`, `ToolContribution`, `ToolCatalog` internally, used by
    `PromptRunner.withReference` and `safelyGetTools`. `Tool` and `LlmReference` unchanged; an
-   adapter turns `LlmReference` into a contribution.
-2. Move `McpToolExport`, `Skills`, `ToolishRag` onto the same port; delete
-   `Skills.sanitizeToolName` and the `namingStrategy` guard.
-3. Optional: introduce `ToolId` and deprecate `StringTransformer`, `RenamedTool`, and the
-   `tools()` / `unprefixedTools()` split. Public API (`ToolObject.namingStrategy`,
+   adapter turns `LlmReference` and `ToolObject` into contributions. Add
+   `Namespacing.Custom(StringTransformer)` (deprecated) for user-written naming strategies.
+   Done when the `startsWith` guard is deleted and the step-1 tests still pass untouched.
+3. Move leaves to declarations one PR at a time (`Skills`, `ToolishRag`, `McpToolExport`
+   first); delete `Skills.sanitizeToolName`. The catalog must support nested contributions
+   (unfolding) and dynamic additions (tool loop injection); `byWireName` replaces the linear
+   `find` in `DefaultToolLoop`/`StreamingToolLoop`.
+4. Optional: `ToolId`; deprecate `StringTransformer`, `RenamedTool`, `Namespacing.Custom`
+   and the `tools()` / `unprefixedTools()` split. Public API (`ToolObject.namingStrategy`,
    `LlmReference`, Java callers) needs a deprecation path.
 
-Open question for maintainers: is a catalog-level refactor (step 1) acceptable before any
+Open question for maintainers: is a catalog-level refactor (step 2) acceptable before any
 `Tool` interface change?
