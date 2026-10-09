@@ -1,229 +1,118 @@
-# Architectural Proposal: Type-Driven Tool Identity & Boundary-Only Stringification
+# Proposal: Unified Tool Contribution & Boundary-Only Naming
 
-**Author**: Tuan Nguyen & DeepMind Pair Programming Assistant  
-**Date**: October 2026  
-**Status**: Proposed (Phase 1 Implemented in PR)  
-**Related Issues / PRs**: #2093, #2095, #2132  
+**Status**: Proposed (design only; the code in this PR is the stop-gap, see section 6)
+**Related**: #2093, #2095, #2132
 
----
+## 1. Problem
 
-## 1. Executive Summary & Root Cause Analysis
+Every tool source decides tool names its own way, so nothing keeps them in sync:
 
-Recent bugs and regression debates around tool registration in `PromptRunner`, `LlmReference`, `ToolishRag`, and `Skills` (#2093, #2095, #2132) revealed a fundamental vulnerability in the system's architecture: **String-Oriented Programming (Primitive Obsession) in Tool Identity**.
+| Source | Enters as | Who decides the name |
+|---|---|---|
+| `Tool` / `@LlmTool` POJO | `ToolObject(objects, namingStrategy, filter)` | transformer attached from outside |
+| `LlmReference` (RAG, Skills, memory, code) | `unprefixedTools()` + `namingStrategy`; legacy `tools()` may already be prefixed | the reference (`toolPrefix()`) |
+| `UnfoldingTool`, `AgenticTool`, `PlaybookTool`, `StateMachineTool` | nested tools, inner tools visible after unfolding | the parent tool |
+| MCP export (`McpToolExport`) | `ToolObject` + `namingStrategy` applied twice | two transformer layers |
+| MCP client / Spring AI `ToolCallback` | external name strings | the remote server |
+| `PerGoalToolFactory` | generated from goals | the factory |
 
-### The Core Issues
-1. **Multi-Path Registration Bug (#2132)**:
-   `PromptRunner.withReference()` previously registered tools twice:
-   - Once via `withToolObject(reference.toolObject())` (applying `reference.namingStrategy`).
-   - Once via `withTools(reference.tools())` (passing raw or pre-prefixed names).
-   This resulted in duplicate tools sent to the LLM, breaking schema validation and confusing model function-calling loops.
-2. **Double-Prefixing & Fragile String Concatenation**:
-   When references and nested tool containers (such as `ToolishRag`, `Skills`, `UnfoldingTool`, and DICE `Memory`) expose tools, they mutate tool names via string transformations:
-   $$\text{newName} = \text{prefix} + \text{"\_"} + \text{oldName}$$
-   This caused:
-   - `docs_vectorSearch` becoming `docs_docs_vectorSearch`.
-   - `memory` becoming `memory_memory`.
-   - `github_workflows` becoming `github_workflows_github_workflows`.
-   - Script tools becoming `p_p_x`.
-3. **Loss of Tool Provenance & Identity**:
-   Wrapping a tool in `RenamedTool` stripped or masked context, and de-duplication was performed using naive string equality (`distinctBy { it.definition.name }`), causing silent drops when names clashed.
+At least six places manipulate name strings (`LlmReference.toolPrefix/namingStrategy`,
+`ToolObject.withPrefix`, `McpToolExport`, `ToolishRag.tools()`, `RenamedTool`,
+`Skills.sanitizeToolName`). The bugs `docs_docs_*`, `memory_memory`, `p_p_x` arise where these
+meet: the aggregator cannot tell whether a name is already final, so each fix adds another
+string heuristic (`startsWith("${prefix}_")`).
 
----
+The function side is already direct (`Tool.call`). What is missing is declared intent about
+naming, and one place that owns it.
 
-## 2. Anatomy of the Current Aggregation Pipeline
+## 2. Principle
 
-Where do tools congregate today before being dispatched to the LLM?
+Sources **declare** how their tools are named; one component **decides** the wire name. No
+string guessing in the core, no string rewriting by individual sources.
 
-```mermaid
-flowchart TD
-    subgraph Sources [Tool Sources]
-        RAG[ToolishRag]
-        SKILLS[Skills / SkillScript]
-        MCP[McpToolExport]
-        UNFOLD[UnfoldingReference]
-        POJO[Annotated POJO / Methods]
-    end
-
-    subgraph Assembly [PromptRunner Assembly Point]
-        PR[PromptRunner.withReference / withToolObject / withTool]
-        TO[toolObjects: List<ToolObject>]
-        OT[otherTools: List<Tool>]
-    end
-
-    subgraph Resolution [Resolution & Convergence]
-        SGT["safelyGetTools(toolObjects) + otherTools"]
-        WARN["distinctByNameWarningOnCollision()"]
-        INTER["LlmInteraction.tools: List<Tool>"]
-    end
-
-    subgraph Wire [Provider Boundary]
-        CLIENT[ChatClientLlmOperations / Spring AI]
-        LLM[LLM API: OpenAI / Anthropic / Gemini]
-    end
-
-    Sources --> PR
-    PR --> TO
-    PR --> OT
-    TO --> SGT
-    OT --> SGT
-    SGT --> WARN
-    WARN --> INTER
-    INTER --> CLIENT
-    CLIENT --> LLM
-```
-
-### The Current Information Flow:
-1. **Tool Objects**: `ToolObject(objects: List<Any>, namingStrategy: StringTransformer, filter: (String) -> Boolean)`.
-2. **Tool Definition**: `Tool.Definition(name: String, description: String, inputSchema: Tool.InputSchema)`.
-3. **Execution Function**: `Tool.call(input: String, context: ToolCallContext): Tool.Result`.
-
-### Why This Is Fragile:
-- **`StringTransformer` is blind**: It does not know who owns the tool, whether the name was already prefixed, or what namespace hierarchy exists.
-- **De-duplication is lossy**: When two tools produce the same string, one is dropped without structural insight into whether they are the same tool or conflicting implementations.
-
----
-
-## 3. The Target Architecture: Type-Driven Tool Identity
-
-Instead of passing mutable strings and relying on string transformers, tool management should transition to **Type-Driven Identity** with **Boundary-Only Stringification**.
-
-### 3.1 Structural Identity: `ToolId` & `ToolNamespace`
+## 3. Design
 
 ```kotlin
-package com.embabel.agent.api.tool
-
-/**
- * Hierarchical namespace representing ownership/source of a tool.
- * Examples: ToolNamespace("docs"), ToolNamespace("skills", "github-workflows")
- */
-@JvmInline
-value class ToolNamespace(val segments: List<String>) {
-    constructor(vararg segments: String) : this(segments.filter { it.isNotBlank() })
-
-    val isRoot: Boolean get() = segments.isEmpty()
-
-    fun child(segment: String): ToolNamespace =
-        ToolNamespace(segments + segment)
-
-    companion object {
-        val ROOT = ToolNamespace(emptyList())
-    }
+// domain
+sealed interface Namespacing {
+    data object None : Namespacing                    // names are already final
+    data class Prefix(val ns: String) : Namespacing   // docs + search -> docs_search
+    data class Collapse(val ns: String) : Namespacing // the tool is the entry point: memory -> memory
 }
 
-/**
- * Immutable, globally unique structural identifier for a tool.
- */
-data class ToolId(
-    val namespace: ToolNamespace = ToolNamespace.ROOT,
-    val name: String,
-) {
-    init {
-        require(name.isNotBlank()) { "Tool simple name cannot be blank" }
-    }
-
-    fun within(parentNamespace: ToolNamespace): ToolId =
-        ToolId(ToolNamespace(parentNamespace.segments + namespace.segments), name)
+// port, implemented by every source
+interface ToolSource {
+    fun contribute(): ToolContribution
 }
+
+data class ToolContribution(
+    val namespacing: Namespacing,
+    val tools: List<Tool>,          // simple names, not prefixed
+    val promptNotes: String? = null,
+)
 ```
 
-### 3.2 First-Class Tool Descriptor & Direct Function Binding
+`ToolCatalog` (application layer) is the single aggregation point:
 
-Directly couple identity and the execution function pointer without intermediary string wrapping:
+- accepts `ToolContribution`s and resolves each tool's wire name in one place;
+- detects collisions on the **resolved wire name** (not on raw names, not by wrapper identity)
+  and applies one policy: fail or warn once per distinct pair;
+- exposes `byWireName: Map<String, Tool>` (used to route the LLM's tool call back) and
+  `nameFor(tool)` (used by prompt text, e.g. `Skills` script-tool lists), so prompt and
+  catalog share a single source of truth.
 
-```kotlin
-interface ToolDescriptor {
-    val id: ToolId
-    val description: String
-    val schema: Tool.InputSchema
-    val metadata: Tool.Metadata
-    
-    /**
-     * Direct function execution binding.
-     */
-    fun execute(input: String, context: ToolCallContext): Tool.Result
-}
-```
+Layering:
 
-### 3.3 The `ToolRegistry` Primitive
+| Layer | Holds |
+|---|---|
+| Domain | `Tool`, `Namespacing` (later possibly `ToolId`) |
+| Application | `ToolCatalog`: aggregation, namespacing decision, collision policy |
+| Port | `ToolSource` |
+| Adapters | RAG, Skills, MCP, Spring AI, `UnfoldingReference` implement `ToolSource` |
+| Wire boundary | sanitization, allowed characters, per-provider length limits |
 
-Replace loose lists (`toolObjects` and `otherTools`) with a strongly typed registry:
+`LlmReference` stops carrying sanitization rules in a default method. A plain reference maps to
+`Prefix`, `UnfoldingReference` to `Collapse`, final-name sources to `None`. This replaces the
+idempotent guard in `namingStrategy` with explicit intent.
 
-```kotlin
-class ToolRegistry private constructor(
-    private val entries: Map<ToolId, ToolDescriptor> = emptyMap()
-) {
-    fun register(descriptor: ToolDescriptor): ToolRegistry {
-        val existing = entries[descriptor.id]
-        if (existing != null && existing !== descriptor) {
-            logger.warn("Duplicate tool registration for ID ${descriptor.id}. Overriding.")
-        }
-        return ToolRegistry(entries + (descriptor.id to descriptor))
-    }
+## 4. What this does and does not fix
 
-    fun registerAll(descriptors: Collection<ToolDescriptor>): ToolRegistry =
-        descriptors.fold(this) { acc, desc -> acc.register(desc) }
+- `memory_memory`, `docs_docs`: sources say `Collapse`/`None`; the catalog never guesses.
+- Duplicate registration and wrapper-identity false positives: dedup is by resolved name.
+- Prompt/catalog drift: both call `nameFor`.
+- Not fixed by types alone: a tool named `docs_search` inside a `Prefix("docs")` source still
+  becomes `docs_docs_search`. Sources must supply simple names. Joining with `_` is not
+  injective (`(a_b, c)` and `(a, b_c)` both give `a_b_c`), so the collision check on wire
+  names is required, not optional.
 
-    fun get(id: ToolId): ToolDescriptor? = entries[id]
+## 5. Boundary rules
 
-    fun all(): Collection<ToolDescriptor> = entries.values
-}
-```
+- Strings still exist at two boundaries: inbound (MCP, Spring AI, `@LlmTool` names) and
+  outbound (the LLM wire). Inbound names are parsed into a contribution once; outbound names
+  are produced once by the catalog.
+- The LLM returns a wire-name string. Routing needs the `byWireName` map; the formatter is
+  not invertible once names are lowercased/sanitized, so never `parse` a wire name.
+- Sanitization normalizes display names (`"My API"` -> `my_api`) through a factory; `require`
+  is only for already-normalized values. Allowed characters and max length (OpenAI:
+  `^[a-zA-Z0-9_-]{1,64}$`; MCP names may contain `.`) are provider configuration at the
+  boundary, not constants in the core.
+- Non-ASCII names collapse to underscores; two references can then share a prefix. The
+  collision check must report this.
 
----
+## 6. Roadmap
 
-## 4. Boundary-Only Stringification (Late Wire Serialization)
+0. **This PR (stop-gap)**: single-path registration, idempotent guard, whitespace-safe
+   `toolPrefix()`, inner-tool renaming for unfolding, collision warning. Known gaps are listed
+   in the review (log noise, wrapper-class names in warnings, inner-tool rename is a
+   behavior change). These heuristics are meant to be removed by step 2.
+1. Add `Namespacing`, `ToolContribution`, `ToolCatalog` internally, used by
+   `PromptRunner.withReference` and `safelyGetTools`. `Tool` and `LlmReference` unchanged; an
+   adapter turns `LlmReference` into a contribution.
+2. Move `McpToolExport`, `Skills`, `ToolishRag` onto the same port; delete
+   `Skills.sanitizeToolName` and the `namingStrategy` guard.
+3. Optional: introduce `ToolId` and deprecate `StringTransformer`, `RenamedTool`, and the
+   `tools()` / `unprefixedTools()` split. Public API (`ToolObject.namingStrategy`,
+   `LlmReference`, Java callers) needs a deprecation path.
 
-### Should we strictly avoid `String` before calling the LLM?
-- **Internally: YES, absolutely.**
-  Throughout the SDK, RAG engines, Skill engines, and PromptRunner, tools MUST be identified, indexed, and routed solely by `ToolId` and function pointers.
-- **At the LLM Network Wire: NO (by protocol constraint).**
-  External LLM APIs (OpenAI Function Calling, Anthropic Tool Use, Gemini Function Declarations) mandate a single string identifier (matching regex like `^[a-zA-Z0-9_-]{1,64}$`).
-- **The Solution: Pure Wire-Boundary Serialization.**
-  String formatting happens **at the edge adapter only**, right before JSON serialization:
-
-```kotlin
-interface WireToolNameFormatter {
-    fun format(id: ToolId): String
-    fun parse(wireName: String): ToolId?
-}
-
-object StandardWireToolNameFormatter : WireToolNameFormatter {
-    override fun format(id: ToolId): String {
-        if (id.namespace.isRoot) return sanitize(id.name)
-        val ns = id.namespace.segments.joinToString("_") { sanitize(it) }
-        return "${ns}_${sanitize(id.name)}"
-    }
-
-    private fun sanitize(value: String): String =
-        value.trim().lowercase().replace(Regex("[^a-zA-Z0-9]"), "_").trim('_')
-}
-```
-
-### Bidirectional Wire Routing:
-When the LLM responds with a tool call:
-1. Provider adapter extracts wire name: `"docs_vectorSearch"`.
-2. Registry looks up mapped `ToolId(ToolNamespace("docs"), "vectorSearch")`.
-3. Invokes `descriptor.execute(input, context)` directly.
-4. No ambiguity, zero string mutation in transit!
-
----
-
-## 5. Phased Roadmap
-
-### Phase 1 (Immediate / Implemented in this PR):
-- Enforce single-path registration in `PromptRunner.withReference()`.
-- Add idempotent guard to `LlmReference.namingStrategy` (prevents `memory_memory`, `p_p_x`).
-- Sanitize whitespace in `LlmReference.toolPrefix()` (`"My API"` $\rightarrow$ `"my_api"`).
-- Propagate naming strategy to inner tools of `UnfoldingReference` to avoid cross-reference collisions.
-- Add collision diagnostic warning logging in `safelyGetTools`.
-- Add full test assertions protecting `runner.otherTools.isEmpty()`.
-
-### Phase 2 (Intermediate Bridge):
-- Introduce `ToolId` and `ToolDescriptor` as optional extensions in `embabel-agent-api`.
-- Bridge `ToolObject` to populate `ToolRegistry` internally.
-- Deprecate `StringTransformer.transform` on tool names in favor of structured namespacing.
-
-### Phase 3 (Unified Architecture):
-- Migrate `LlmInteraction` to consume `ToolRegistry`.
-- Wire `ChatClientLlmOperations` directly to `WireToolNameFormatter`.
-- Eliminate `RenamedTool` wrapper and string-based distinct operations completely.
+Open question for maintainers: is a catalog-level refactor (step 1) acceptable before any
+`Tool` interface change?
