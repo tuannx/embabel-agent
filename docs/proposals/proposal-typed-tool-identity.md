@@ -3,6 +3,18 @@
 **Status**: Proposed. Design only; the code in this PR is a stop-gap (see section 8).
 **Related**: #1834, #2093, #2095, #2132
 
+## 0. Glossary
+
+- **Leaf**: a concrete source of tools in its own module (RAG, Skills, MCP, code, ...).
+- **Wire name**: the final string the LLM sees and returns in a tool call.
+- **Namespacing**: how a leaf's tool names are combined with the leaf's own name to form wire
+  names. `Prefix`: `docs` + `search` -> `docs_search`. `Collapse`: the tool is the entry point,
+  so `memory` + `memory` -> `memory`. `None`: names are already final.
+- **Golden test**: a test that compares the full list of wire names per source against a
+  checked-in file; any difference fails and must be reviewed on purpose.
+- **Characterization test**: a test that records what the code does today, including quirks,
+  so later refactors cannot change behavior unnoticed.
+
 ## 1. Summary
 
 Tool names sent to the LLM are decided in at least six independent places. Each fix for a
@@ -36,7 +48,7 @@ What each entry point supplies:
 | `Tool` / `@LlmTool` POJO | `ToolObject(objects, namingStrategy, filter)` or `withTool(s)` | a `StringTransformer` attached from outside |
 | `LlmReference` (RAG, Skills, memory, code, web) | `unprefixedTools()` + `namingStrategy`; the legacy `tools()` may already be prefixed (`ToolishRag.tools()`) | the reference, via `toolPrefix()` |
 | `UnfoldingTool`, `AgenticTool`, `PlaybookTool`, `StateMachineTool` | nested tools; inner tools appear after the parent is called | the parent tool |
-| `ToolGroup` / `ToolPublisher` / `ToolConsumer` | resolved by `ToolGroupResolver` | not yet audited (see section 7) |
+| `ToolGroup` / `ToolPublisher` / `ToolConsumer` | resolved by role through `ToolGroupResolver` (`RegistryToolGroupResolver`) | nobody: tools keep their own names (audited, see below) |
 | MCP client, Spring AI `ToolCallback` | external name strings | the remote server |
 | `McpToolExport` (outbound) | `ToolObject` + `namingStrategy`, chained with a second strategy | two transformer layers |
 | `PerGoalToolFactory` | generated from goals | the factory |
@@ -45,6 +57,25 @@ The function side is already direct: every source ends up as a `Tool` whose `cal
 context)` runs the code. Identity is the weak part: it is only `definition.name: String`,
 and namespacing is a string transformation applied afterwards (`RenamedTool` wraps a tool
 only to change its name).
+
+### ToolGroup path (audited)
+
+`ToolConsumer.resolveTools` collects `consumer.tools` plus, for each `ToolGroupRequirement`
+(identified by `role`), the tools of the group found by `ToolGroupResolver`. No renaming
+happens on this path: group tools keep their own `definition.name`. Three name-based behaviors
+matter for any change to naming:
+
+- `requiredToolNames` is checked against the **raw** names of the resolved group
+  (missing names throw). If the catalog renamed group tools, this check would fail.
+- `ToolConsumer.resolveTools` runs its own `distinctBy { it.definition.name }.sortedBy {...}`.
+  This is a second, independent dedup next to `safelyGetTools`, with no collision logging.
+- `DefaultToolDecorator` calls `findToolGroupForTool(toolName = tool.definition.name)`, and
+  `RegistryToolGroupResolver` implements it by scanning `tg.tools.any { name == toolName }`.
+  It maps a tool back to its group by raw name; a renamed tool would not be found.
+
+Conclusion: a group behaves like `Namespacing.None`, but two other components depend on its raw
+names, so the catalog must keep the original name available (for example `Tool` -> original
+name + wire name) or those lookups must move to the catalog.
 
 ### How an LLM tool call is routed today
 
@@ -163,8 +194,9 @@ idempotent guard in `namingStrategy` with explicit intent.
   `unprefixedTools()`, `McpToolExport`, Java callers. Needs adapters and a deprecation path.
 - LLM-visible names are a de facto contract (prompts, tests, integrations depend on them), so
   no step may change them unnoticed.
-- The `ToolGroup` / `ToolGroupResolver` branch has not been audited for naming rules; it must
-  be covered by the characterization tests before the catalog is wired in.
+- The `ToolGroup` path renames nothing but has name-based consumers (`requiredToolNames`,
+  `findToolGroupForTool`, a separate `distinctBy`). The catalog must preserve the original
+  name or take over those lookups (section 2, "ToolGroup path").
 - Dynamic tools (unfolding, loop injection) require the catalog to support nested and
   incremental contributions.
 
@@ -184,6 +216,8 @@ idempotent guard in `namingStrategy` with explicit intent.
    - MCP export with chained naming strategies;
    - dynamic tools injected or removed by the tool loop;
    - round trip: the wire name the LLM would return reaches the right function;
+   - `ToolGroup`: `requiredToolNames` still matches, `findToolGroupForTool` still finds the
+     group, and the second `distinctBy` in `ToolConsumer.resolveTools` agrees with the first;
    - names rendered in prompt text equal the names in the catalog.
    Leaves: `Tool`/`@LlmTool` via `ToolObject`, `ToolishRag`, `Skills` (+ script tools), memory,
    code/file references, `UnfoldingReference`, agentic tools, MCP export, MCP client /
