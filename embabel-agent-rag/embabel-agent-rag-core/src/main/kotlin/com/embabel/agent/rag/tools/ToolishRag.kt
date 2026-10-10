@@ -320,8 +320,6 @@ data class ToolishRag @JvmOverloads constructor(
         )
     }
 
-    // LlmReference: returns flat list of inner tools with naming strategy applied.
-    //
     // Items in [toolObjects] may already BE [Tool] instances (e.g. [TextSearchTools],
     // which is a Tool with a description composed dynamically from the store's
     // [TextSearch.luceneSyntaxNotes]) or they may be classes carrying `@LlmTool`-annotated
@@ -339,8 +337,8 @@ data class ToolishRag @JvmOverloads constructor(
             }
         }
 
-    // tools() returns prefixed names (e.g. "docs_vectorSearch") for backward compatibility.
-    // Direct callers that relied on rag.tools() returning prefixed names continue to work.
+    // LlmReference: tools() returns flat list of inner tools with naming strategy applied (e.g. "docs_vectorSearch")
+    // for backward compatibility with external callers that directly invoke rag.tools().
     override fun tools(): List<Tool> = unprefixedTools()
         .map { tool -> tool.withName(namingStrategy.transform(tool.definition.name)) }
 

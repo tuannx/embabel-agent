@@ -236,21 +236,7 @@ data class Skills @JvmOverloads constructor(
         // Track activation for potential future use
         activatedSkillNames.add(skill.name)
 
-        val scriptTools = skill.getScriptTools(scriptExecutionEngine)
-        val activationText = skill.getActivationText()
-
-        return if (scriptTools.isNotEmpty()) {
-            val toolNames = scriptTools.map { it.definition.name }
-            """
-            |$activationText
-            |
-            |## Available Script Tools
-            |The following script tools can be used for this skill:
-            |${toolNames.joinToString("\n") { "- $it" }}
-            """.trimMargin()
-        } else {
-            activationText
-        }
+        return skillBody(skill)
     }
 
     /**
