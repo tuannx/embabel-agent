@@ -74,7 +74,7 @@ class TypeSafeBenchmarkTest {
                 .setBody("""{"model":"jev-latest","answers":{$answersJson},"usage":{"input_tokens":900,"output_tokens":120}}""")
         )
         val provider = TypeSafeDecisionProvider(
-            properties = TypeSafeProperties(
+            properties = TypeSafeDecisionProviderProperties(
                 apiKey = "test-key",
                 baseUrl = server.url("/").toString().removeSuffix("/"),
             ),
