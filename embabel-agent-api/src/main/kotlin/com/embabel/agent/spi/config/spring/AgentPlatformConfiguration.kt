@@ -19,7 +19,9 @@ package com.embabel.agent.spi.config.spring
 
 import com.embabel.agent.api.channel.DevNullOutputChannel
 import com.embabel.agent.api.channel.OutputChannel
+import com.embabel.agent.api.common.decision.DecisionProvider
 import com.embabel.agent.api.common.ranking.Ranker
+import com.embabel.agent.api.common.ranking.RankingStrategy
 import com.embabel.agent.api.event.AgenticEventListener
 import com.embabel.agent.api.event.observation.AgentInstrumentation
 import com.embabel.agent.api.event.observation.InternalObservabilityApi
@@ -143,10 +145,31 @@ class AgentPlatformConfiguration(
     fun ranker(
         llmOperations: LlmOperations,
         rankingProperties: RankingProperties,
-    ): Ranker = LlmRanker(
-        llmOperations = llmOperations,
-        rankingProperties = rankingProperties,
-    )
+        decisionProvider: ObjectProvider<DecisionProvider>,
+    ): Ranker {
+        val llmRanker = LlmRanker(
+            llmOperations = llmOperations,
+            rankingProperties = rankingProperties,
+        )
+        if (rankingProperties.strategy == RankingStrategy.LLM) {
+            return llmRanker
+        }
+        val provider = decisionProvider.getIfAvailable()
+        if (provider != null && provider.isAvailable) {
+            return DecisionRanker(
+                decisionProvider = provider,
+                delegate = llmRanker,
+                rankingProperties = rankingProperties,
+            )
+        }
+        if (rankingProperties.strategy == RankingStrategy.JEV) {
+            throw IllegalStateException(
+                "Ranking strategy is JEV but no decision backend is available. " +
+                    "Set TYPESAFE_API_KEY or switch embabel.agent.platform.ranking.strategy to auto."
+            )
+        }
+        return llmRanker
+    }
 
     /**
      * Runtime repository, decorated for durability when the application supplies an

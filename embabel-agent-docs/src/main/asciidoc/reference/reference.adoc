@@ -41,6 +41,8 @@ include::decision-specs/page.adoc[]
 
 include::decision-execution/page.adoc[]
 
+include::decisions/page.adoc[]
+
 include::bedrock/page.adoc[]
 
 include::minimax/page.adoc[]

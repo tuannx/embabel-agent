@@ -17,6 +17,7 @@ package com.embabel.agent.test.integration
 
 import com.embabel.agent.api.channel.DevNullOutputChannel
 import com.embabel.agent.api.common.PlatformServices
+import com.embabel.agent.api.common.decision.DecisionProvider
 import com.embabel.common.util.EmbabelObjectMapperHolder
 import com.embabel.agent.api.event.AgenticEventListener
 import com.embabel.agent.core.*
@@ -71,6 +72,7 @@ object IntegrationTestUtils {
     fun dummyPlatformServices(
         eventListener: AgenticEventListener? = null,
         logicalExpressionParser: LogicalExpressionParser = LogicalExpressionParser.EMPTY,
+        decisionProvider: DecisionProvider? = null,
     ): PlatformServices {
         return SpringContextPlatformServices(
             agentPlatform = dummyAgentPlatform(),
@@ -84,6 +86,7 @@ object IntegrationTestUtils {
             templateRenderer = JinjavaTemplateRenderer(),
             customLogicalExpressionParser = logicalExpressionParser,
             agentProcessRepository = InMemoryAgentProcessRepository(),
+            decisionProviderInstance = decisionProvider,
         )
     }
 

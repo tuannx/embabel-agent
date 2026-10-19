@@ -20,7 +20,6 @@
     </scm>
     
     <modules>
-        <module>embabel-agent-starter-typesafe</module>
         <module>embabel-agent-starter</module>
         <module>embabel-agent-starter-platform</module>
         <module>embabel-agent-starter-shell</module>
@@ -47,6 +46,7 @@
         <module>embabel-agent-starter-webmvc</module>
         <module>embabel-agent-starter-onnx</module>
         <module>embabel-agent-starter-jdbc</module>
+        <module>embabel-agent-starter-typesafe</module>
     </modules>
 
 </project>
