@@ -67,7 +67,7 @@ internal data class OperationContextPromptRunner(
     override val generateExamples: Boolean?,
     override val fieldFilter: Predicate<Field> = Predicate { true },
     override val validation: Boolean = true,
-    private val otherTools: List<Tool> = emptyList(),
+    val otherTools: List<Tool> = emptyList(),
     private val guardRails: List<GuardRail> = emptyList(),
     private val toolLoopInspectors: List<ToolLoopInspector> = emptyList(),
     private val toolLoopTransformers: List<ToolLoopTransformer> = emptyList(),

@@ -19,11 +19,13 @@ import com.embabel.agent.api.common.support.OperationContextPromptRunner
 import com.embabel.agent.api.reference.LlmReference
 import com.embabel.agent.api.tool.Tool
 import com.embabel.agent.api.tool.ToolCallContext
+import com.embabel.agent.api.tool.progressive.UnfoldingTool
 import com.embabel.agent.core.support.safelyGetTools
 import com.embabel.common.ai.model.LlmOptions
 import io.mockk.mockk
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Nested
 import org.junit.jupiter.api.Test
 
@@ -51,6 +53,7 @@ class WithReferenceToolRegistrationTest {
 
             val tools = safelyGetTools(runner.toolObjects)
             assertEquals(1, tools.size, "Each tool must appear exactly once")
+            assertTrue(runner.otherTools.isEmpty(), "otherTools must be empty to prevent duplicate registration")
         }
 
         @Test
@@ -62,6 +65,7 @@ class WithReferenceToolRegistrationTest {
 
             val tools = safelyGetTools(runner.toolObjects)
             assertEquals("docs_search", tools[0].definition.name)
+            assertTrue(runner.otherTools.isEmpty())
         }
 
         @Test
@@ -72,6 +76,7 @@ class WithReferenceToolRegistrationTest {
             val runner = makeRunner().withReference(reference) as OperationContextPromptRunner
 
             assertEquals(1, runner.toolObjects.size)
+            assertTrue(runner.otherTools.isEmpty(), "otherTools must be empty")
         }
 
         @Test
@@ -86,6 +91,7 @@ class WithReferenceToolRegistrationTest {
             assertEquals(2, tools.size, "Both tools must appear, each exactly once")
             val names = tools.map { it.definition.name }.toSet()
             assertEquals(setOf("api_search", "api_fetch"), names)
+            assertTrue(runner.otherTools.isEmpty())
         }
     }
 
@@ -125,6 +131,52 @@ class WithReferenceToolRegistrationTest {
             val tools = safelyGetTools(runner.toolObjects)
             assertEquals(1, tools.size)
             assertEquals("docs", tools[0].definition.name, "Must be 'docs', not 'docs_docs'")
+            assertTrue(runner.otherTools.isEmpty())
+        }
+
+        @Test
+        fun `withUnfolding applies naming strategy to inner tools to prevent collisions across unfolded references`() {
+            val innerTool = Tool.of("search", "Search") { Tool.Result.text("ok") }
+            val reference = LlmReference.of("docs", "Documentation", listOf(innerTool))
+                .withUnfolding()
+
+            val runner = makeRunner().withReference(reference) as OperationContextPromptRunner
+            val tools = safelyGetTools(runner.toolObjects)
+            assertEquals(1, tools.size)
+            val unfoldingTool = tools[0] as UnfoldingTool
+            val innerNames = unfoldingTool.innerTools.map { it.definition.name }
+            assertEquals(listOf("docs_search"), innerNames)
+        }
+    }
+
+    @Nested
+    inner class ToolPrefixAndNamingStrategy {
+
+        @Test
+        fun `toolPrefix sanitizes whitespace and special characters to underscore`() {
+            assertEquals("my_custom_api", LlmReference.of("My Custom API", "desc", emptyList()).toolPrefix())
+            assertEquals("foo_bar", LlmReference.of("foo-bar", "desc", emptyList()).toolPrefix())
+            assertEquals("a_b_c", LlmReference.of("a.b.c", "desc", emptyList()).toolPrefix())
+        }
+
+        @Test
+        fun `namingStrategy does not double prefix tools matching prefix exactly or starting with prefix_`() {
+            val ref = LlmReference.of("memory", "desc", emptyList())
+            assertEquals("memory", ref.namingStrategy.transform("memory"))
+            assertEquals("memory_clear", ref.namingStrategy.transform("memory_clear"))
+            assertEquals("memory_save", ref.namingStrategy.transform("save"))
+        }
+
+        @Test
+        fun `withReference does not double prefix tools matching reference prefix`() {
+            val memoryTool = Tool.of("memory", "Memory tool") { Tool.Result.text("ok") }
+            val reference = LlmReference.of("memory", "Memory reference", listOf(memoryTool))
+
+            val runner = makeRunner().withReference(reference) as OperationContextPromptRunner
+            val tools = safelyGetTools(runner.toolObjects)
+            assertEquals(1, tools.size)
+            assertEquals("memory", tools[0].definition.name, "Should not be memory_memory")
+            assertTrue(runner.otherTools.isEmpty())
         }
     }
 

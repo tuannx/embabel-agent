@@ -18,9 +18,14 @@ package com.embabel.agent.api.reference
 import com.embabel.agent.api.tool.Tool
 import com.embabel.agent.api.tool.ToolObject
 import com.embabel.agent.api.tool.progressive.UnfoldingTool
+import com.embabel.agent.core.support.renamedBy
 import com.embabel.common.ai.prompt.PromptContributor
 import com.embabel.common.core.types.NamedAndDescribed
 import com.embabel.common.util.StringTransformer
+import org.slf4j.Logger
+import org.slf4j.LoggerFactory
+
+private val logger: Logger = LoggerFactory.getLogger(LlmReference::class.java)
 
 /**
  * An LLmReference exposes tools and is a prompt contributor.
@@ -41,13 +46,29 @@ interface LlmReference : NamedAndDescribed, PromptContributor {
      * Defaults to the name lowercased with spaces replaced by underscores.
      * Subclasses can override it
      */
-    fun toolPrefix(): String = name.replace(Regex("[^a-zA-Z0-9 ]"), "_").lowercase()
+    fun toolPrefix(): String = name.replace(Regex("[^a-zA-Z0-9]"), "_").lowercase()
 
     /**
      * Naming strategy for tools associated with this reference.
-     * Defaults to prefixing tool names with the tool prefix and an underscore.
+     * Defaults to prefixing tool names with the tool prefix and an underscore. A name that is
+     * the tool prefix, or already starts with it, is kept as-is to ensure idempotency.
      */
-    val namingStrategy: StringTransformer get() = StringTransformer { toolName -> "${toolPrefix()}_$toolName" }
+    val namingStrategy: StringTransformer
+        get() = StringTransformer { toolName ->
+            val prefix = toolPrefix()
+            if (toolName == prefix || toolName.startsWith("${prefix}_")) {
+                val owner = if (this is SimpleLlmReference) "" else " (${javaClass.name})"
+                logger.warn(
+                    "Reference '{}'{} returned tool '{}', which already has prefix '{}'. " +
+                        "The name is kept as is. unprefixedTools() should return unprefixed names; " +
+                        "if the names are final, override namingStrategy to return StringTransformer.IDENTITY.",
+                    name, owner, toolName, prefix,
+                )
+                toolName
+            } else {
+                "${prefix}_$toolName"
+            }
+        }
 
     /**
      * Create a tool object for this reference.
@@ -268,7 +289,7 @@ private class UnfoldingReference(
     override fun toolInstances(): List<Any> = emptyList()
 
     override fun tools(): List<Tool> {
-        val innerTools = delegate.tools()
+        val innerTools = delegate.unprefixedTools()
         if (innerTools.isEmpty()) {
             return emptyList()
         }
@@ -276,7 +297,7 @@ private class UnfoldingReference(
             UnfoldingTool.of(
                 name = delegate.toolPrefix(),
                 description = delegate.description,
-                innerTools = innerTools,
+                innerTools = innerTools.renamedBy(delegate.namingStrategy),
                 childToolUsageNotes = childToolUsageNotes,
             )
         )
