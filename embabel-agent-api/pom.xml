@@ -312,4 +312,147 @@
         </plugins>
     </build>
 
+    <profiles>
+        <!--
+          vmlens harness: opt-in data-race checks (pass 2 next to the Fray harness in
+          src/frayTest, which stays untouched). Enable with -Pvmlens; without the profile
+          this block is inert and the build is exactly as before: the src/vmlensTest
+          sources are not compiled, no vmlens dependency is resolved and no agent runs.
+
+          vmlens is the memory-model complement of Fray: Fray controls the schedule at
+          synchronization points and judges behavior, vmlens records field accesses and
+          judges their happens-before ordering. The two agents must never run in the
+          same JVM, so this pass has its own source set, its own surefire run (restricted
+          to *VmlensTest) and its own agent installation; JaCoCo is disabled for the run
+          so no second agent shares the JVM either.
+
+          The race verdict lives in the HTML report generated in the verify phase into
+          target/reports/vmlens (a test only asserts that interleavings were explored
+          and that deterministic behavior holds); the positive control in
+          VmlensPositiveControlTest is what makes a "Success" report trustworthy.
+          See src/vmlensTest/README.md.
+        -->
+        <profile>
+            <id>vmlens</id>
+            <properties>
+                <vmlens.version>1.2.28</vmlens.version>
+                <vmlens.agent.directory>${project.build.directory}/vmlens-agent</vmlens.agent.directory>
+                <!-- Keep the vmlens agent the only agent in the test JVM. -->
+                <jacoco.skip>true</jacoco.skip>
+            </properties>
+            <dependencies>
+                <dependency>
+                    <groupId>com.vmlens</groupId>
+                    <artifactId>api</artifactId>
+                    <version>${vmlens.version}</version>
+                    <scope>test</scope>
+                </dependency>
+            </dependencies>
+            <build>
+                <plugins>
+                    <!-- Compile src/vmlensTest/kotlin as test sources, only under this profile. -->
+                    <plugin>
+                        <groupId>org.jetbrains.kotlin</groupId>
+                        <artifactId>kotlin-maven-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>test-compile</id>
+                                <configuration>
+                                    <sourceDirs combine.children="append">
+                                        <source>src/vmlensTest/kotlin</source>
+                                    </sourceDirs>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+
+                    <!-- Fetch the vmlens standalone jar (agent installer + report generator). -->
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-dependency-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>vmlens-fetch-standalone</id>
+                                <phase>generate-test-resources</phase>
+                                <goals>
+                                    <goal>copy</goal>
+                                </goals>
+                                <configuration>
+                                    <artifactItems>
+                                        <artifactItem>
+                                            <groupId>com.vmlens</groupId>
+                                            <artifactId>standalone</artifactId>
+                                            <version>${vmlens.version}</version>
+                                            <type>jar</type>
+                                            <outputDirectory>${project.build.directory}/vmlens</outputDirectory>
+                                            <destFileName>standalone-${vmlens.version}.jar</destFileName>
+                                        </artifactItem>
+                                    </artifactItems>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+
+                    <!-- Install the agent before tests fork; generate the report in verify. -->
+                    <plugin>
+                        <groupId>org.codehaus.mojo</groupId>
+                        <artifactId>exec-maven-plugin</artifactId>
+                        <version>3.6.4</version>
+                        <executions>
+                            <execution>
+                                <id>vmlens-install-agent</id>
+                                <phase>process-test-classes</phase>
+                                <goals>
+                                    <goal>exec</goal>
+                                </goals>
+                                <configuration>
+                                    <executable>${java.home}/bin/java</executable>
+                                    <workingDirectory>${project.build.directory}</workingDirectory>
+                                    <arguments>
+                                        <argument>-jar</argument>
+                                        <argument>${project.build.directory}/vmlens/standalone-${vmlens.version}.jar</argument>
+                                        <argument>install</argument>
+                                    </arguments>
+                                </configuration>
+                            </execution>
+                            <execution>
+                                <id>vmlens-report</id>
+                                <phase>verify</phase>
+                                <goals>
+                                    <goal>exec</goal>
+                                </goals>
+                                <configuration>
+                                    <executable>${java.home}/bin/java</executable>
+                                    <arguments>
+                                        <argument>-jar</argument>
+                                        <argument>${project.build.directory}/vmlens/standalone-${vmlens.version}.jar</argument>
+                                        <argument>-a</argument>
+                                        <argument>${vmlens.agent.directory}</argument>
+                                        <argument>-r</argument>
+                                        <argument>${project.build.directory}/reports/vmlens</argument>
+                                        <argument>report</argument>
+                                    </arguments>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+
+                    <!-- Run only the vmlens tests, with the vmlens agent attached. -->
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-surefire-plugin</artifactId>
+                        <configuration>
+                            <argLine>@{argLine} -Duser.language=en -Duser.country=US -javaagent:${vmlens.agent.directory}/agent.jar</argLine>
+                            <includes>
+                                <include>**/*VmlensTest.*</include>
+                            </includes>
+                            <!-- Reruns would interleave traces from several JVM runs in one report. -->
+                            <rerunFailingTestsCount>0</rerunFailingTestsCount>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
+
 </project>
